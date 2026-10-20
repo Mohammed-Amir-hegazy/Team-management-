@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: team-management
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/setup-status
+    envVars:
+      - key: COOKIE_SECURE
+        value: "1"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1
