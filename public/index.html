@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>إدارة الشغل</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="auth" class="auth hidden"></div>
+
+  <div id="shell" class="shell hidden">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">إدارة الشغل</div>
+      <nav>
+        <a href="#/dashboard" data-nav="dashboard">🏠 الرئيسية</a>
+        <a href="#/projects" data-nav="projects">📁 المشاريع</a>
+        <a href="#/tasks" data-nav="tasks">✅ التاسكات</a>
+        <a href="#/reports" data-nav="reports">📝 الريبورتات <span class="badge hidden" id="badge-reports"></span></a>
+        <a href="#/requests" data-nav="requests">📦 الطلبات <span class="badge hidden" id="badge-requests"></span></a>
+        <a href="#/team" data-nav="team">👥 الفريق</a>
+        <a href="#/notifications" data-nav="notifications">🔔 الإشعارات <span class="badge hidden" id="badge-notifications"></span></a>
+      </nav>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="القائمة">☰</button>
+        <div class="me" id="me"></div>
+        <div class="topbar-actions">
+          <a href="#/notifications" class="icon-btn bell" aria-label="الإشعارات">🔔<span class="dot hidden" id="bell-dot"></span></a>
+          <button class="btn ghost small" id="password-btn">كلمة المرور</button>
+          <button class="btn ghost small" id="logout-btn">خروج</button>
+        </div>
+      </header>
+      <main id="view" class="view"></main>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

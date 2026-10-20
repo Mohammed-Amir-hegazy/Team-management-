@@ -1,0 +1,15 @@
+{
+  "name": "team-management",
+  "version": "1.0.0",
+  "description": "نظام إدارة الشغل بالأدوار: صاحب الشركة، مدير، تيم ليدر، موظف",
+  "main": "server/index.js",
+  "private": true,
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/index.js",
+    "test": "node --no-warnings=ExperimentalWarning --test test/*.test.js"
+  },
+  "license": "MIT"
+}
