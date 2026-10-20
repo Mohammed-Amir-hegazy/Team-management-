@@ -1,13 +1,18 @@
+# Render free web service + Turso free database. Render asks for the two Turso values on first deploy.
 services:
   - type: web
     name: team-management
-    runtime: docker
-    plan: starter
-    healthCheckPath: /api/setup-status
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: "22"
       - key: COOKIE_SECURE
         value: "1"
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

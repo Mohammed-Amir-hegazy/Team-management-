@@ -28,49 +28,49 @@ function roleRank(role) {
 }
 
 function getUser(db, userId) {
-  return db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  return db.get('SELECT * FROM users WHERE id = ?', userId);
 }
 
 // Everyone below userId in the reporting tree (not including userId).
-function subordinateIds(db, userId) {
-  const rows = db.prepare(`
+async function subordinateIds(db, userId) {
+  const rows = await db.all(`
     WITH RECURSIVE sub(id) AS (
       SELECT id FROM users WHERE supervisor_id = ?
       UNION ALL
       SELECT u.id FROM users u JOIN sub ON u.supervisor_id = sub.id
     )
     SELECT id FROM sub
-  `).all(userId);
+  `, userId);
   return new Set(rows.map((r) => r.id));
 }
 
 // Supervisor chain of userId, nearest first (not including userId).
-function ancestorIds(db, userId) {
-  const rows = db.prepare(`
+async function ancestorIds(db, userId) {
+  const rows = await db.all(`
     WITH RECURSIVE up(id, supervisor_id, depth) AS (
       SELECT id, supervisor_id, 0 FROM users WHERE id = ?
       UNION ALL
       SELECT u.id, u.supervisor_id, up.depth + 1 FROM users u JOIN up ON u.id = up.supervisor_id
     )
     SELECT id FROM up WHERE depth > 0 ORDER BY depth
-  `).all(userId);
+  `, userId);
   return rows.map((r) => r.id);
 }
 
-function isAbove(db, upperId, lowerId) {
-  return ancestorIds(db, lowerId).includes(upperId);
+async function isAbove(db, upperId, lowerId) {
+  return (await ancestorIds(db, lowerId)).includes(upperId);
 }
 
 // Self or anyone below: the people a user may assign work to.
-function isSelfOrBelow(db, user, otherId) {
+async function isSelfOrBelow(db, user, otherId) {
   return user.id === otherId || isAbove(db, user.id, otherId);
 }
 
-function requireSupervisor(db, user) {
+async function requireSupervisor(db, user) {
   if (!user.supervisor_id) {
     throw new HttpError(400, 'لا يوجد مسؤول أعلى منك لإرسال هذا إليه');
   }
-  const supervisor = getUser(db, user.supervisor_id);
+  const supervisor = await getUser(db, user.supervisor_id);
   if (!supervisor || !supervisor.active) {
     throw new HttpError(400, 'المسؤول المباشر عنك غير متاح حالياً');
   }
@@ -93,59 +93,88 @@ const VISIBLE_PROJECTS_SQL = `
 
 function visibleProjects(db, user) {
   if (user.role === 'owner') {
-    return db.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
+    return db.all('SELECT * FROM projects ORDER BY created_at DESC');
   }
-  return db.prepare(`${VISIBLE_PROJECTS_SQL} ORDER BY p.created_at DESC`).all(user.id, user.id);
+  return db.all(`${VISIBLE_PROJECTS_SQL} ORDER BY p.created_at DESC`, user.id, user.id);
 }
 
-function canSeeProject(db, user, project) {
+async function canSeeProject(db, user, project) {
   if (user.role === 'owner') return true;
-  return !!db.prepare(`${VISIBLE_PROJECTS_SQL} AND p.id = ?`).get(user.id, user.id, project.id);
+  return !!(await db.get(`${VISIBLE_PROJECTS_SQL} AND p.id = ?`, user.id, user.id, project.id));
 }
 
 function canManageProject(user, project) {
   return user.role === 'owner' || project.created_by === user.id;
 }
 
-function isProjectMember(db, projectId, userId) {
-  return !!db.prepare('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?').get(projectId, userId);
+async function isProjectMember(db, projectId, userId) {
+  return !!(await db.get('SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?', projectId, userId));
 }
 
 function addProjectMember(db, projectId, userId) {
-  db.prepare('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)')
-    .run(projectId, userId, now());
+  return db.run('INSERT OR IGNORE INTO project_members (project_id, user_id, added_at) VALUES (?, ?, ?)',
+    projectId, userId, now());
 }
 
-function loadProject(db, user, projectId) {
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
-  if (!project || !canSeeProject(db, user, project)) throw new HttpError(404, 'المشروع غير موجود');
+async function loadProject(db, user, projectId) {
+  const project = await db.get('SELECT * FROM projects WHERE id = ?', projectId);
+  if (!project || !(await canSeeProject(db, user, project))) throw new HttpError(404, 'المشروع غير موجود');
   return project;
 }
 
 // ---- Tasks ----------------------------------------------------------------
 
-function loadTask(db, user, taskId) {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId);
+async function loadTask(db, user, taskId) {
+  const task = await db.get('SELECT * FROM tasks WHERE id = ?', taskId);
   if (!task) throw new HttpError(404, 'التاسك غير موجودة');
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(task.project_id);
-  if (!canSeeProject(db, user, project)) throw new HttpError(404, 'التاسك غير موجودة');
+  const project = await db.get('SELECT * FROM projects WHERE id = ?', task.project_id);
+  if (!(await canSeeProject(db, user, project))) throw new HttpError(404, 'التاسك غير موجودة');
   return { task, project };
 }
 
 // Edit details, reassign, delete: the creator, the owner, or anyone above the assignee.
-function canEditTask(db, user, task) {
+async function canEditTask(db, user, task) {
   return user.role === 'owner' || task.created_by === user.id || isAbove(db, user.id, task.assignee_id);
 }
 
-function canUpdateTaskStatus(db, user, task) {
+async function canUpdateTaskStatus(db, user, task) {
   return task.assignee_id === user.id || canEditTask(db, user, task);
+}
+
+// Removes tasks and everything hanging off them. Done explicitly rather than relying on
+// ON DELETE CASCADE so it behaves the same whether or not foreign keys are enforced.
+// taskIdsSql is a SELECT returning the ids of the tasks to remove.
+async function purgeTasks(db, taskIdsSql, ...args) {
+  const inTasks = `IN (${taskIdsSql})`;
+  await db.run(`UPDATE reports SET task_id = NULL WHERE task_id ${inTasks}`, ...args);
+  await db.run(`DELETE FROM requirements WHERE task_id ${inTasks}`, ...args);
+  await db.run(`DELETE FROM task_status_history WHERE task_id ${inTasks}`, ...args);
+  await purgeRequests(db, `SELECT id FROM requests WHERE task_id ${inTasks}`, ...args);
+  await db.run(`DELETE FROM tasks WHERE id ${inTasks}`, ...args);
+}
+
+async function purgeRequests(db, requestIdsSql, ...args) {
+  const ids = (await db.all(requestIdsSql, ...args)).map((r) => r.id);
+  if (!ids.length) return;
+  const ph = ids.map(() => '?').join(',');
+  await db.run(`UPDATE requirements SET request_id = NULL WHERE request_id IN (${ph})`, ...ids);
+  await db.run(`UPDATE requests SET forwarded_from_id = NULL, root_id = NULL WHERE id IN (${ph})`, ...ids);
+  await db.run(`DELETE FROM requests WHERE id IN (${ph})`, ...ids);
+}
+
+async function deleteProject(db, projectId) {
+  await purgeTasks(db, 'SELECT id FROM tasks WHERE project_id = ?', projectId);
+  await purgeRequests(db, 'SELECT id FROM requests WHERE project_id = ?', projectId);
+  await db.run('UPDATE reports SET project_id = NULL WHERE project_id = ?', projectId);
+  await db.run('DELETE FROM project_members WHERE project_id = ?', projectId);
+  await db.run('DELETE FROM projects WHERE id = ?', projectId);
 }
 
 // ---- Notifications --------------------------------------------------------
 
 function notify(db, userId, type, message, link = '') {
-  db.prepare('INSERT INTO notifications (user_id, type, message, link, created_at) VALUES (?, ?, ?, ?, ?)')
-    .run(userId, type, message, link, now());
+  return db.run('INSERT INTO notifications (user_id, type, message, link, created_at) VALUES (?, ?, ?, ?, ?)',
+    userId, type, message, link, now());
 }
 
 function publicUser(user) {
@@ -185,6 +214,8 @@ module.exports = {
   loadTask,
   canEditTask,
   canUpdateTaskStatus,
+  purgeTasks,
+  deleteProject,
   notify,
   publicUser,
 };

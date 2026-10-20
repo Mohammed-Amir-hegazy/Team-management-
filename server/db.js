@@ -1,6 +1,6 @@
 'use strict';
 
-const { DatabaseSync } = require('node:sqlite');
+const { createClient } = require('@libsql/client');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS requests (
   note              TEXT NOT NULL DEFAULT '',
   response_note     TEXT NOT NULL DEFAULT '',
   forwarded_from_id INTEGER REFERENCES requests(id) ON DELETE CASCADE,
+  -- The original request of a forwarding chain (NULL on the original itself); items hang off it.
+  root_id           INTEGER REFERENCES requests(id) ON DELETE CASCADE,
   created_at        TEXT NOT NULL,
   responded_at      TEXT
 );
@@ -121,34 +123,72 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_users_supervisor ON users(supervisor_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_reminder ON tasks(reminder_sent, reminder_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_overdue ON tasks(overdue_notified, deadline);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_requirements_task ON requirements(task_id);
 CREATE INDEX IF NOT EXISTS idx_requests_recipient ON requests(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_reports_recipient ON reports(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);
 `;
 
-function openDatabase(filename) {
-  const db = new DatabaseSync(filename);
-  db.exec('PRAGMA foreign_keys = ON');
-  if (filename !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
-  db.exec(SCHEMA);
-  return db;
+// Small promise-based query API shared by the database and by open transactions,
+// so helpers work the same whether or not they run inside a transaction.
+class Queryable {
+  constructor(execute) {
+    this.execute = execute;
+  }
+
+  async all(sql, ...args) {
+    const rs = await this.execute({ sql, args });
+    return rs.rows.map((row) => Object.fromEntries(rs.columns.map((col, i) => [col, row[i]])));
+  }
+
+  async get(sql, ...args) {
+    return (await this.all(sql, ...args))[0];
+  }
+
+  async run(sql, ...args) {
+    const rs = await this.execute({ sql, args });
+    return { changes: rs.rowsAffected, lastInsertRowid: Number(rs.lastInsertRowid) };
+  }
 }
 
-function transaction(db, fn) {
-  db.exec('BEGIN');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
+class Database extends Queryable {
+  constructor(client) {
+    super((stmt) => client.execute(stmt));
+    this.client = client;
   }
+
+  async transaction(fn) {
+    const tx = await this.client.transaction('write');
+    try {
+      const result = await fn(new Queryable((stmt) => tx.execute(stmt)));
+      await tx.commit();
+      return result;
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    } finally {
+      tx.close();
+    }
+  }
+
+  close() {
+    this.client.close();
+  }
+}
+
+// url: "libsql://<db>.turso.io" for Turso, or "file:path/to.db" for a local file.
+async function openDatabase(url, authToken) {
+  const client = createClient({ url, authToken });
+  if (url.startsWith('file:')) await client.execute('PRAGMA journal_mode = WAL');
+  await client.executeMultiple(SCHEMA);
+  return new Database(client);
 }
 
 function now() {
   return new Date().toISOString();
 }
 
-module.exports = { openDatabase, transaction, now };
+module.exports = { openDatabase, now };

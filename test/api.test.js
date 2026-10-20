@@ -3,6 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { openDatabase } = require('../server/db');
 const { createApp } = require('../server/app');
 const { runReminders } = require('../server/scheduler');
@@ -10,15 +13,22 @@ const { runReminders } = require('../server/scheduler');
 let server;
 let base;
 let db;
+let tmpDir;
 
 test.before(async () => {
-  db = openDatabase(':memory:');
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'team-test-'));
+  // TEST_DATABASE_URL runs the suite against a libSQL server (e.g. http://127.0.0.1:8080) instead of a file.
+  db = await openDatabase(process.env.TEST_DATABASE_URL || `file:${path.join(tmpDir, 'test.db')}`);
   server = http.createServer(createApp(db));
   await new Promise((resolve) => server.listen(0, resolve));
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-test.after(() => server.close());
+test.after(() => {
+  server.close();
+  db.close();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 function client() {
   let cookie = '';
@@ -229,14 +239,14 @@ test('reminder and overdue alarms', async () => {
     reminder_at: new Date(Date.now() - 1000).toISOString(),
     deadline: new Date(Date.now() + 3600 * 1000).toISOString(),
   });
-  const fired = runReminders(db);
+  const fired = await runReminders(db);
   assert.ok(fired >= 1);
-  assert.equal(runReminders(db), 0, 'each alarm fires once');
+  assert.equal(await runReminders(db), 0, 'each alarm fires once');
 
   let notes = await employee('GET', '/api/notifications');
   assert.ok(notes.data.notifications.some((n) => n.type === 'reminder'));
 
-  runReminders(db, new Date(Date.now() + 2 * 3600 * 1000));
+  await runReminders(db, new Date(Date.now() + 2 * 3600 * 1000));
   notes = await employee('GET', '/api/notifications');
   assert.ok(notes.data.notifications.some((n) => n.type === 'overdue'));
   const leaderNotes = await leader('GET', '/api/notifications');
@@ -249,4 +259,35 @@ test('auth guards', async () => {
   const res = await fetch(`${base}/api/login`, { method: 'POST', body: 'email=a' });
   assert.equal(res.status, 415);
   assert.equal((await anon('POST', '/api/login', { email: 'e@x.com', password: 'wrong' })).status, 401);
+});
+
+test('deleting a task and a project removes everything under them', async () => {
+  const p = await manager('POST', '/api/projects', { name: 'Temp', member_ids: [people.leader.id] });
+  const pid = p.data.project.id;
+  const t1 = await leader('POST', `/api/projects/${pid}/tasks`, { title: 'A', assignee_id: people.employee.id });
+  const t2 = await leader('POST', `/api/projects/${pid}/tasks`, { title: 'B', assignee_id: people.employee.id });
+  for (const t of [t1, t2]) {
+    await employee('POST', `/api/tasks/${t.data.task.id}/requirements`, { description: 'thing' });
+  }
+  await employee('POST', `/api/tasks/${t1.data.task.id}/requirements/send`, {});
+  const reqs = await leader('GET', '/api/requests');
+  const sent = reqs.data.requests.find((r) => r.task_id === t1.data.task.id);
+  await leader('POST', `/api/requests/${sent.id}/forward`, {});
+  await employee('POST', '/api/reports', { title: 'r', body: 'b', task_id: t2.data.task.id });
+
+  // Employee cannot delete; leader (creator) can.
+  assert.equal((await employee('DELETE', `/api/tasks/${t1.data.task.id}`)).status, 403);
+  assert.equal((await leader('DELETE', `/api/tasks/${t1.data.task.id}`)).status, 200);
+  assert.equal((await leader('GET', `/api/tasks/${t1.data.task.id}`)).status, 404);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM requests WHERE task_id = ?', t1.data.task.id)).n, 0);
+
+  assert.equal((await leader('DELETE', `/api/projects/${pid}`)).status, 403);
+  assert.equal((await manager('DELETE', `/api/projects/${pid}`)).status, 200);
+  for (const table of ['tasks', 'requests', 'project_members']) {
+    assert.equal((await db.get(`SELECT COUNT(*) AS n FROM ${table} WHERE project_id = ?`, pid)).n, 0, table);
+  }
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM requirements WHERE task_id = ?', t2.data.task.id)).n, 0);
+  // The report survives, just detached from the deleted task.
+  const sentReports = await employee('GET', '/api/reports?box=sent');
+  assert.ok(sentReports.data.reports.some((r) => r.title === 'r' && r.task_id === null));
 });

@@ -8,12 +8,26 @@ const { createApp } = require('./app');
 const { startScheduler } = require('./scheduler');
 
 const PORT = Number(process.env.PORT) || 3000;
-const DB_FILE = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'team.db');
 
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
-const db = openDatabase(DB_FILE);
-startScheduler(db);
+// Turso in production (TURSO_DATABASE_URL + TURSO_AUTH_TOKEN), a local file otherwise.
+function databaseUrl() {
+  if (process.env.TURSO_DATABASE_URL) return process.env.TURSO_DATABASE_URL;
+  const file = process.env.DB_FILE || path.join(__dirname, '..', 'data', 'team.db');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return `file:${file}`;
+}
 
-http.createServer(createApp(db)).listen(PORT, () => {
-  console.log(`Team management is running on http://localhost:${PORT}`);
+async function main() {
+  const url = databaseUrl();
+  const db = await openDatabase(url, process.env.TURSO_AUTH_TOKEN);
+  startScheduler(db);
+  http.createServer(createApp(db)).listen(PORT, () => {
+    const where = url.startsWith('file:') ? url : 'Turso';
+    console.log(`Team management is running on http://localhost:${PORT} (database: ${where})`);
+  });
+}
+
+main().catch((err) => {
+  console.error('Failed to start:', err);
+  process.exit(1);
 });

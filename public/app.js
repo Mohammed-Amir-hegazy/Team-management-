@@ -244,7 +244,7 @@ $('#menu-btn').addEventListener('click', () => $('#sidebar').classList.toggle('o
 function startPolling() {
   stopPolling();
   pollNotifications();
-  state.pollTimer = setInterval(pollNotifications, 20000);
+  state.pollTimer = setInterval(pollNotifications, 30000);
 }
 
 function stopPolling() {
@@ -255,14 +255,11 @@ function stopPolling() {
 async function pollNotifications() {
   if (!state.me) return;
   try {
-    const [{ notifications, unread }, dash] = await Promise.all([
-      api('GET', '/api/notifications'),
-      api('GET', '/api/dashboard'),
-    ]);
+    const { notifications, unread, unread_reports: reports, pending_requests: requests } = await api('GET', '/api/notifications');
     setBadge('notifications', unread);
     $('#bell-dot').classList.toggle('hidden', unread === 0);
-    setBadge('reports', dash.unread_reports);
-    setBadge('requests', dash.pending_requests);
+    setBadge('reports', reports);
+    setBadge('requests', requests);
 
     const fresh = notifications.filter((n) => n.id > state.lastNotificationId);
     const firstVisit = state.lastNotificationId === 0;

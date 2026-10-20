@@ -5,11 +5,14 @@
   "main": "server/index.js",
   "private": true,
   "engines": {
-    "node": ">=22.13"
+    "node": ">=20"
   },
   "scripts": {
-    "start": "node --no-warnings=ExperimentalWarning server/index.js",
-    "test": "node --no-warnings=ExperimentalWarning --test test/*.test.js"
+    "start": "node server/index.js",
+    "test": "node --test test/*.test.js"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@libsql/client": "^0.18.0"
+  }
 }

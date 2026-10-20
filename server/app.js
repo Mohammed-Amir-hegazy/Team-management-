@@ -8,6 +8,8 @@ const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
 function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}) {
   const router = new Router();
+  // For uptime checks and keep-awake pings: never touches the database.
+  router.get('/api/health', () => ({ ok: true }), { public: true });
   require('./routes/users')(router);
   require('./routes/projects')(router);
   require('./routes/tasks')(router);
@@ -44,7 +46,7 @@ function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}
         if (!type.startsWith('application/json')) throw new HttpError(415, 'يجب إرسال البيانات بصيغة JSON');
         ctx.body = await readJson(req);
       }
-      ctx.user = userFromSession(db, ctx.cookies.sid);
+      ctx.user = await userFromSession(db, ctx.cookies.sid);
       if (!found.route.options.public && !ctx.user) throw new HttpError(401, 'يجب تسجيل الدخول');
       const result = await found.route.handler(ctx);
       sendJson(res, 200, result ?? { ok: true });
