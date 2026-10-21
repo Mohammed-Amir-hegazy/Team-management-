@@ -22,7 +22,10 @@ const COMPANY_SQL = `
     (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) AS active_users,
     (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.deleted_at IS NULL) AS total_users,
     (SELECT MAX(u.last_login_at) FROM users u WHERE u.company_id = c.id) AS last_activity,
-    (SELECT u.id FROM users u WHERE u.company_id = c.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS owner_id
+    COALESCE(
+      (SELECT u.id FROM users u WHERE u.company_id = c.id AND u.role = 'owner' AND u.deleted_at IS NULL ORDER BY u.id LIMIT 1),
+      (SELECT u.id FROM users u WHERE u.company_id = c.id AND u.deleted_at IS NULL AND ',' || u.roles || ',' LIKE '%,admin,%' ORDER BY u.id LIMIT 1)
+    ) AS owner_id
   FROM companies c
 `;
 
@@ -32,7 +35,8 @@ async function withOwner(db, c) {
     ...c,
     plan_label: PLAN_LABELS[c.plan],
     ...accessOf(c),
-    owner: owner ? { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone } : null,
+    // The company's contact: its owner, or the system admin who registered it while there is no owner.
+    owner: owner ? { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone, is_owner: owner.role === 'owner' } : null,
   };
 }
 
@@ -93,14 +97,17 @@ module.exports = function register(router) {
     if (phone && await db.get('SELECT 1 FROM users WHERE phone = ?', phone)) throw new HttpError(409, 'رقم الهاتف مسجّل في حساب آخر');
     const years = boundedInt(body.years, 'عدد السنوات', 1, 10, 1);
     const days = boundedInt(body.days, 'عدد الأيام', 1, 365, config.trialDays);
+    const creator = v.oneOf(body.creator_role || 'owner', ['owner', 'admin'], 'صفة صاحب الحساب');
+    const level = creator === 'admin' ? v.oneOf(body.creator_level, ['manager', 'team_leader', 'employee'], 'الدور الوظيفي') : 'owner';
+    const roles = creator === 'admin' ? [level, 'admin'] : ['owner'];
 
     const id = await db.transaction(async (tx) => {
       const companyId = await createCompany(tx, { name, plan, seats, days, years, userId: user.id });
       await tx.run(`
         INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, supervisor_id, created_at)
-        VALUES (?, ?, ?, 'owner', 'owner', ?, ?, ?, NULL, ?)
-      `, ownerName, email, auth.hashPassword(password), v.text(body.owner_job_title, 'المسمى الوظيفي', { required: false, max: 120 }),
-      phone, companyId, now());
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      `, ownerName, email, auth.hashPassword(password), level, roles.join(','),
+      v.text(body.owner_job_title, 'المسمى الوظيفي', { required: false, max: 120 }), phone, companyId, now());
       return companyId;
     });
     return { company: await withOwner(db, await loadCompany(db, id)) };

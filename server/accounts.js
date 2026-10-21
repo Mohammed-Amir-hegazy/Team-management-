@@ -25,6 +25,11 @@ async function assertDeletable(db, target, { allowSoleOwner = false } = {}) {
     const { n } = await db.get('SELECT COUNT(*) AS n FROM users WHERE is_platform = 1 AND active = 1 AND deleted_at IS NULL AND id != ?', target.id);
     if (n === 0) throw new HttpError(400, 'لا يمكن حذف حساب مالك المنصة الوحيد');
   }
+  if (target.role !== 'owner' && !target.supervisor_id
+    && !(await db.get("SELECT 1 FROM users WHERE company_id = ? AND role = 'owner' AND deleted_at IS NULL", target.company_id))
+    && (await db.get('SELECT 1 FROM users WHERE supervisor_id = ? AND deleted_at IS NULL', target.id))) {
+    throw new HttpError(400, 'يتبع لهذا الحساب أشخاص ولا يوجد صاحب للشركة يُنقلون إليه؛ يُرجى إضافة صاحب الشركة أولًا');
+  }
   if (target.role === 'owner') {
     if (!allowSoleOwner) throw new HttpError(400, 'لحذف صاحب الشركة يجب حذف الشركة بالكامل');
     if ((await liveCompanyUsers(db, target.company_id)) > 1) {
@@ -35,7 +40,10 @@ async function assertDeletable(db, target, { allowSoleOwner = false } = {}) {
 
 async function deleteAccount(db, target, actor) {
   return db.transaction(async (tx) => {
-    const supervisor = target.supervisor_id ? await getUser(tx, target.supervisor_id) : null;
+    // Work moves to the supervisor, or (for someone at the top, e.g. an admin who registered the company)
+    // to the company owner.
+    const supervisor = target.supervisor_id ? await getUser(tx, target.supervisor_id)
+      : await tx.get("SELECT * FROM users WHERE company_id = ? AND role = 'owner' AND deleted_at IS NULL AND id != ?", target.company_id, target.id);
     const ts = now();
     let moved = 0;
 

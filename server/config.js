@@ -26,6 +26,11 @@ function loadConfig(env = process.env) {
     trialSeats: Number(env.TRIAL_SEATS) || 10,
     // Where companies are directed to renew (the platform owner's WhatsApp / email).
     platformContact: { phone: (env.PLATFORM_CONTACT_PHONE || '').replace(/\D/g, ''), email: env.PLATFORM_CONTACT_EMAIL || '' },
+    // The one account that owns the platform, and where its login codes go (WhatsApp/SMS and email).
+    platformOwnerEmail: (env.PLATFORM_OWNER_EMAIL || 'mohammedamirwork@gmail.com').trim().toLowerCase(),
+    platformOwnerPhone: (env.PLATFORM_OWNER_PHONE || '201018736900').replace(/\D/g, ''),
+    // On Render without Turso the database is a file on a disk that is wiped by every deploy.
+    ephemeralStorage: !env.TURSO_DATABASE_URL && !!env.RENDER,
   };
 }
 

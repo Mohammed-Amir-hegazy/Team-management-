@@ -170,6 +170,17 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Second login step for the platform owner: a short-lived code sent by WhatsApp, SMS or email.
+CREATE TABLE IF NOT EXISTS login_challenges (
+  token      TEXT PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  TEXT NOT NULL,
+  channel    TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  sent_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id         INTEGER PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -279,7 +290,7 @@ async function migrate(db) {
   await db.run('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
 
   // Single-company installs from before the platform: their people become the "ابتكار" company
-  // with a perpetual licence, and its owner becomes the platform owner.
+  // with a perpetual licence. (Who owns the platform is decided by email; see syncPlatformOwner.)
   const { n: orphans } = await db.get('SELECT COUNT(*) AS n FROM users WHERE company_id IS NULL');
   if (orphans > 0) {
     let company = await db.get('SELECT id FROM companies ORDER BY id LIMIT 1');
@@ -292,9 +303,6 @@ async function migrate(db) {
         company.id, 'نُقلت البيانات الحالية إلى هذه الشركة بترخيص ملكية دائمة', ts);
     }
     await db.run('UPDATE users SET company_id = ? WHERE company_id IS NULL', company.id);
-    if (!(await db.get('SELECT 1 FROM users WHERE is_platform = 1'))) {
-      await db.run("UPDATE users SET is_platform = 1 WHERE role = 'owner' AND company_id = ?", company.id);
-    }
   }
   await db.run(`UPDATE projects SET company_id = (SELECT u.company_id FROM users u WHERE u.id = projects.created_by)
     WHERE company_id IS NULL`);

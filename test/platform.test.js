@@ -10,10 +10,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { openDatabase } = require('../server/db');
 const { createApp } = require('../server/app');
-const { runSubscriptionReminders } = require('../server/subscription');
+const { runSubscriptionReminders, createCompany } = require('../server/subscription');
+const { syncPlatformOwner } = require('../server/owner');
 
 const DAY = 24 * 3600 * 1000;
-const config = { cloudinary: null, defaultCountryCode: '20', allowSignup: true, trialDays: 30, trialSeats: 3, platformContact: { phone: '', email: '' } };
+const config = { cloudinary: null, defaultCountryCode: '20', allowSignup: true, trialDays: 30, trialSeats: 3, platformContact: { phone: '', email: '' },
+  platformOwnerEmail: 'amir@ebtikar.co', platformOwnerPhone: '201018736900' };
 const messenger = { channels: { email: false, sms: false, whatsapp: false }, async sendCode() {} };
 
 let server; let base; let db; let tmpDir;
@@ -199,9 +201,36 @@ test('older single-company databases are migrated into a company', async () => {
   assert.equal(company.name, 'ابتكار');
   assert.equal(company.plan, 'owned');
   assert.equal((await migrated.get('SELECT COUNT(*) AS n FROM users WHERE company_id = ?', company.id)).n, 2);
-  assert.equal((await migrated.get("SELECT is_platform FROM users WHERE email = 'b@old.co'")).is_platform, 1);
+  assert.equal((await migrated.get("SELECT is_platform FROM users WHERE email = 'b@old.co'")).is_platform, 0, 'a role never makes a platform owner');
   assert.equal((await migrated.get('SELECT company_id FROM projects')).company_id, company.id);
   migrated.close();
+});
+
+test('the platform owner is always the configured email, and existing data is kept', async () => {
+  const file = path.join(tmpDir, 'sync.db');
+  const store = await openDatabase(`file:${file}`);
+  const companyId = await createCompany(store, { name: 'Host', plan: 'trial', seats: 3, days: 1 });
+  await store.run(`INSERT INTO users (name, email, password_hash, role, roles, company_id, is_platform, created_at)
+    VALUES ('Impostor', 'x@host.co', 'x', 'owner', 'owner', ?, 1, '2026'), ('Amir', 'Owner@Host.co', 'x', 'manager', 'manager,admin', ?, 0, '2026')`,
+  companyId, companyId);
+  await store.run("INSERT INTO projects (name, created_by, company_id, created_at) VALUES ('Kept', 1, ?, '2026')", companyId);
+  const cfg = { platformOwnerEmail: 'owner@host.co' };
+  // Emails are stored lowercase by the app.
+  await store.run("UPDATE users SET email = 'owner@host.co' WHERE name = 'Amir'");
+  await syncPlatformOwner(store, cfg);
+  await syncPlatformOwner(store, cfg);
+  assert.equal((await store.get("SELECT is_platform FROM users WHERE name = 'Impostor'")).is_platform, 0);
+  assert.equal((await store.get("SELECT is_platform FROM users WHERE name = 'Amir'")).is_platform, 1);
+  const company = await store.get('SELECT * FROM companies WHERE id = ?', companyId);
+  assert.equal(company.plan, 'owned');
+  assert.equal(company.status, 'active');
+  assert.equal((await store.get("SELECT COUNT(*) AS n FROM subscription_events WHERE kind = 'owned'")).n, 1, 'runs once, not on every start');
+  store.close();
+  // Re-opening (as on every deploy) migrates additively: nothing is deleted.
+  const again = await openDatabase(`file:${file}`);
+  assert.equal((await again.get('SELECT COUNT(*) AS n FROM users')).n, 2);
+  assert.equal((await again.get("SELECT name FROM projects")).name, 'Kept');
+  again.close();
 });
 
 test('people delete their own account; work and team move up', async () => {

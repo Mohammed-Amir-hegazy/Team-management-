@@ -12,7 +12,13 @@ function esc(s) {
 }
 
 // Branded, right-to-left email used for verification codes.
-function codeEmail({ name, code, minutes }) {
+function codeEmail({ name, code, minutes, purpose = 'reset' }) {
+  const why = purpose === 'login'
+    ? 'تلقّينا طلب تسجيل دخول إلى حسابك على منصة ابتكار. لإكمال الدخول استخدم رمز التحقق التالي:'
+    : 'تلقّينا طلبًا لإعادة تعيين كلمة المرور لحسابك على منصة ابتكار. استخدم رمز التحقق التالي:';
+  const ignore = purpose === 'login'
+    ? 'إذا لم تكن أنت من يحاول الدخول فغيّر كلمة المرور فورًا.'
+    : 'إذا لم تطلب ذلك فتجاهل هذه الرسالة؛ ستبقى كلمة المرور دون تغيير.';
   const html = `<!doctype html><html lang="ar" dir="rtl"><body style="margin:0;background:#F4F4FB;font-family:Tahoma,Arial,sans-serif">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:16px;overflow:hidden">
@@ -21,16 +27,16 @@ function codeEmail({ name, code, minutes }) {
         <span style="display:block;color:#62E98A;font-size:12px">software solutions</span></td></tr>
       <tr><td style="padding:28px;color:#0B0A3A;text-align:right">
         <p style="margin:0 0 12px;font-size:16px">${esc(name)}، تحية طيبة،</p>
-        <p style="margin:0 0 18px;font-size:15px;line-height:1.8">تلقّينا طلبًا لإعادة تعيين كلمة المرور لحسابك على منصة ابتكار. استخدم رمز التحقق التالي:</p>
+        <p style="margin:0 0 18px;font-size:15px;line-height:1.8">${why}</p>
         <div style="text-align:center;margin:0 0 18px"><span style="display:inline-block;direction:ltr;background:#ECEBFD;color:#5146E1;
           font-size:32px;font-weight:bold;letter-spacing:10px;padding:14px 22px;border-radius:12px">${esc(code)}</span></div>
         <p style="margin:0 0 6px;font-size:13px;color:#6E6C93">الرمز صالح لمدة ${minutes} دقائق، ولا يُستخدم إلا مرة واحدة.</p>
-        <p style="margin:0;font-size:13px;color:#6E6C93">إذا لم تطلب ذلك فتجاهل هذه الرسالة؛ ستبقى كلمة المرور دون تغيير.</p>
+        <p style="margin:0;font-size:13px;color:#6E6C93">${ignore}</p>
       </td></tr>
       <tr><td style="background:#F7F7FD;padding:14px 28px;font-size:12px;color:#6E6C93;text-align:center">منصة ابتكار لإدارة الأعمال — Ebtikar Software Solutions</td></tr>
     </table></td></tr></table></body></html>`;
-  const text = `${name}، تحية طيبة،\nرمز التحقق لإعادة تعيين كلمة المرور على منصة ابتكار: ${code}\nالرمز صالح لمدة ${minutes} دقائق. إذا لم تطلب ذلك فتجاهل هذه الرسالة.`;
-  return { subject: 'رمز التحقق — منصة ابتكار', html, text };
+  const text = `${name}، تحية طيبة،\n${why} ${code}\nالرمز صالح لمدة ${minutes} دقائق. ${ignore}`;
+  return { subject: purpose === 'login' ? 'رمز تسجيل الدخول — منصة ابتكار' : 'رمز التحقق — منصة ابتكار', html, text };
 }
 
 function noticeEmail({ name, subject, text }) {
@@ -111,11 +117,13 @@ function createMessenger(env = process.env, fetchImpl = globalThis.fetch) {
       await sendEmail({ to: address, name, ...noticeEmail({ name, subject, text }) });
       return true;
     },
-    async sendCode(channel, { email: address, phone, name, code, minutes }) {
+    async sendCode(channel, { email: address, phone, name, code, minutes, purpose = 'reset' }) {
       if (!channels[channel]) throw new HttpError(400, 'طريقة الإرسال المختارة غير مفعّلة');
       if (channel === 'email' && devLog) { console.log(`[OTP_DEV_LOG] ${address}: ${code}`); return undefined; }
-      if (channel === 'email') return sendEmail({ to: address, name, ...codeEmail({ name, code, minutes }) });
-      const text = `منصة ابتكار: رمز التحقق لإعادة تعيين كلمة المرور هو ${code}، وهو صالح لمدة ${minutes} دقائق. لا تشاركه مع أحد.`;
+      if (channel === 'email') return sendEmail({ to: address, name, ...codeEmail({ name, code, minutes, purpose }) });
+      const text = purpose === 'login'
+        ? `منصة ابتكار: رمز تسجيل الدخول إلى حسابك هو ${code}، وهو صالح لمدة ${minutes} دقائق. لا تشاركه مع أحد.`
+        : `منصة ابتكار: رمز التحقق لإعادة تعيين كلمة المرور هو ${code}، وهو صالح لمدة ${minutes} دقائق. لا تشاركه مع أحد.`;
       return sendTwilio(phone, text, channel === 'whatsapp');
     },
   };

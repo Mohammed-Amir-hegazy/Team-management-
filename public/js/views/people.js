@@ -13,6 +13,7 @@ function relationTo(u) {
 }
 
 const ROLE_HINTS = {
+  owner: 'أعلى مستوى في الشركة؛ ويتبعه من هم في قمة الهيكل حاليًا',
   manager: 'يشرف على قادة الفرق ويتابع أعمالهم',
   team_leader: 'يقود فريقًا ويتابع مهامه وتقاريره',
   employee: 'ينفّذ المهام ويرفع التقارير',
@@ -62,6 +63,7 @@ export async function viewPeople() {
       <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة موظف</button>` : ''}</div>
     </div>
     ${!admin ? `<div class="callout blue">${icon('shield')}<div>إنشاء الحسابات وتعديل الأدوار من صلاحيات صاحب الشركة ومسؤول النظام.</div></div>` : ''}
+    ${admin && !users.some((u) => u.role === 'owner' && u.active) ? `<div class="callout amber">${icon('alert')}<div>لم يُضف حساب صاحب الشركة بعد. يمكنك إضافته من «إضافة موظف» باختيار دور «صاحب الشركة»، وسيتبعه من هم في قمة الهيكل حاليًا.</div></div>` : ''}
     <div class="toolbar"><div class="input-icon">${icon('search')}<input id="q" type="search" placeholder="ابحث بالاسم أو المسمى الوظيفي"></div></div>
     <section class="card">
       <div class="org" id="org"><ul>${roots.map(tree).join('')}</ul></div>
@@ -104,6 +106,8 @@ function userModal(users, user) {
   const isOwner = editing && user.role === 'owner';
   const roles = editing ? user.roles : ['employee'];
   const titles = [...new Set(users.map((u) => u.job_title).filter(Boolean))];
+  // A company registered by its system admin may still be without an owner; one can be added.
+  const canAddOwner = !editing && !users.some((u) => u.role === 'owner' && u.active);
 
   // Never offer someone's own subtree as their supervisor.
   const below = new Set();
@@ -139,16 +143,18 @@ function userModal(users, user) {
       </div>
       ${isOwner ? '' : `
       <div class="field"><label>الأدوار <span class="hint">— يمكن اختيار أكثر من دور، ويُحدَّد المستوى الوظيفي بأعلى دور مختار</span></label>
-        <div class="checks cols">${['manager', 'team_leader', 'employee', 'admin'].map((r) => `<label class="check">
+        <div class="checks cols">${[...(canAddOwner ? ['owner'] : []), 'manager', 'team_leader', 'employee', 'admin'].map((r) => `<label class="check">
           <input type="checkbox" name="roles" value="${r}" data-multi ${roles.includes(r) ? 'checked' : ''}>
           <span class="grow">${ROLE_LABELS[r]}<small>${ROLE_HINTS[r]}</small></span></label>`).join('')}</div></div>
-      <div class="field"><label>المسؤول المباشر</label><select name="supervisor_id" required></select>
+      <div class="field" data-supervisor><label>المسؤول المباشر</label><select name="supervisor_id" required></select>
         <span class="hint">يرفع إليه الموظف تقاريره وطلباته مباشرة.</span></div>
       ${editing && user.id !== state.me.id ? `<label class="switch"><input type="checkbox" name="active" ${user.active ? 'checked' : ''}> الحساب نشط</label>` : ''}`}`,
     submitLabel: editing ? 'حفظ التعديلات' : 'إنشاء الحساب',
     onSubmit: async (d) => {
       const body = { name: d.name, job_title: d.job_title, email: d.email, phone: d.phone };
-      if (!isOwner) {
+      if (d.roles && d.roles.includes('owner')) {
+        body.roles = ['owner'];
+      } else if (!isOwner) {
         body.roles = d.roles;
         body.supervisor_id = Number(d.supervisor_id) || null;
         if (editing && d.active !== undefined) body.active = d.active;
@@ -169,6 +175,14 @@ function userModal(users, user) {
   const select = form.elements.supervisor_id;
   const refresh = () => {
     const chosen = $$('input[name=roles]:checked', form).map((i) => i.value);
+    const asOwner = chosen.includes('owner');
+    $$('input[name=roles]', form).forEach((i) => {
+      if (i.value === 'owner') return;
+      i.disabled = asOwner;
+      if (asOwner) i.checked = false;
+    });
+    $('[data-supervisor]', form).classList.toggle('hidden', asOwner);
+    if (asOwner) { select.disabled = true; return; }
     const level = primaryOf(chosen);
     const current = Number(select.value) || (editing ? user.supervisor_id : state.me.id);
     select.innerHTML = level ? supervisorOptions(level, current) : '';

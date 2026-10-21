@@ -461,3 +461,29 @@ export function periodUsed(startsAt, endsAt) {
   const end = new Date(endsAt).getTime();
   return Math.max(0, Math.min(100, Math.round(((Date.now() - start) / (end - start)) * 100)));
 }
+
+// Who is registering a company: its owner, or its system admin (who also holds an organisational role).
+export function creatorFields(prefix = 'c') {
+  return `
+    <div class="field"><label>صفة صاحب الحساب في الشركة</label><div class="checks cols">
+      <label class="check"><input type="radio" name="creator_role" value="owner" checked>
+        <span class="grow">صاحب الشركة<small>أعلى مستوى في الهيكل، وتصله تقارير المديرين</small></span></label>
+      <label class="check"><input type="radio" name="creator_role" value="admin">
+        <span class="grow">مسؤول النظام<small>يدير الحسابات، ويمكنه إضافة صاحب الشركة لاحقًا</small></span></label>
+    </div></div>
+    <div class="field hidden" data-creator-level><label for="${prefix}-level">الدور الوظيفي لمسؤول النظام</label>
+      <select id="${prefix}-level" name="creator_level">
+        <option value="manager">مدير</option><option value="team_leader">قائد فريق</option><option value="employee">موظف</option>
+      </select></div>`;
+}
+
+export function bindCreatorFields(root) {
+  const level = root.querySelector('[data-creator-level]');
+  const sync = () => {
+    const admin = root.querySelector('input[name=creator_role]:checked')?.value === 'admin';
+    level.classList.toggle('hidden', !admin);
+    level.querySelector('select').disabled = !admin;
+  };
+  root.querySelectorAll('input[name=creator_role]').forEach((r) => r.addEventListener('change', sync));
+  sync();
+}

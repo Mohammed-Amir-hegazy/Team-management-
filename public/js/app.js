@@ -2,7 +2,7 @@
 
 import {
   state, $, $$, esc, icon, mark, api, toast, openModal, formData, avatar, loader, setFab,
-  ROLE_LABELS, busy,
+  ROLE_LABELS, busy, creatorFields, bindCreatorFields,
 } from './core.js';
 import { viewDashboard } from './views/dashboard.js';
 import { viewProjects, viewProject } from './views/projects.js';
@@ -68,7 +68,7 @@ async function showAuth() {
     <div class="auth-card card">
       <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
       <h1>${needsSetup ? 'إعداد النظام' : 'تسجيل الدخول'}</h1>
-      ${needsSetup ? '<p class="muted small">يُنشأ هذا الحساب مرة واحدة ليكون حساب مالك المنصة.</p>' : ''}
+      ${needsSetup ? '<p class="muted small">إعداد الشركة الأولى على المنصة؛ يمكن أن يكون مُنشئ الحساب صاحب الشركة أو مسؤول النظام فيها.</p>' : ''}
       <form id="auth-form" novalidate>
         ${needsSetup ? `
           <div class="field"><label for="f-company">اسم الشركة</label><input id="f-company" name="company_name" value="ابتكار" required></div>
@@ -76,7 +76,8 @@ async function showAuth() {
           <div class="fields">
             <div class="field"><label for="f-title">المسمى الوظيفي</label><input id="f-title" name="job_title" placeholder="مثال: المدير التنفيذي"></div>
             <div class="field"><label for="f-phone">رقم واتساب</label><input id="f-phone" name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
-          </div>` : ''}
+          </div>
+          ${creatorFields('f')}` : ''}
         <div class="field"><label for="f-email">البريد الإلكتروني</label>
           <div class="input-icon">${icon('user')}<input id="f-email" name="email" type="email" required autocomplete="username" dir="ltr"></div></div>
         ${passwordField('f-pass', 'password', needsSetup ? 'new-password' : 'current-password')}
@@ -89,6 +90,7 @@ async function showAuth() {
     </div>
     <div class="auth-copy">© ${new Date().getFullYear()} Ebtikar Software Solutions</div>`;
   bindPasswordToggles(el);
+  if (needsSetup) bindCreatorFields(el);
   const signup = $('#signup', el);
   if (signup) signup.addEventListener('click', (e) => { e.preventDefault(); showSignup(); });
   const forgot = $('#forgot', el);
@@ -98,8 +100,12 @@ async function showAuth() {
     const btn = $('button[type=submit]', e.target);
     btn.disabled = true;
     try {
-      await api('POST', needsSetup ? '/api/setup' : '/api/login', formData(e.target));
+      const r = await api('POST', needsSetup ? '/api/setup' : '/api/login', formData(e.target));
+      if (r.two_factor) { showLoginCode(r); return; }
       await enterApp();
+      if (r.two_factor_unavailable) {
+        toast('تنبيه: التحقق بخطوتين لحساب مالك المنصة غير مفعّل لعدم إعداد خدمة الرسائل', { error: true });
+      }
     } catch (err) {
       $('.form-error', e.target).textContent = err.message;
     } finally {
@@ -122,6 +128,7 @@ function showSignup() {
         <div class="field"><label>المسمى الوظيفي</label><input name="job_title" placeholder="مثال: المدير العام"></div>
       </div>
       <div class="field"><label>رقم واتساب</label><input name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
+      ${creatorFields('s')}
       <div class="field"><label>البريد الإلكتروني</label><div class="input-icon">${icon('user')}<input name="email" type="email" required dir="ltr" autocomplete="username"></div></div>
       ${passwordField('s-pass', 'password', 'new-password')}
       <div class="form-error" role="alert"></div>
@@ -129,6 +136,7 @@ function showSignup() {
     </form>
     <div class="signup-cta"><a href="#" id="back-login">لديك حساب بالفعل؟ تسجيل الدخول</a></div>`;
   bindPasswordToggles(card);
+  bindCreatorFields(card);
   $('#back-login', card).addEventListener('click', (e) => { e.preventDefault(); showAuth(); });
   $('#signup-form', card).addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -144,6 +152,72 @@ function showSignup() {
       btn.disabled = false;
     }
   });
+}
+
+const CODE_CHANNELS = { whatsapp: ['واتساب', 'whatsapp'], sms: ['رسالة نصية SMS', 'phone'], email: ['البريد الإلكتروني', 'user'] };
+
+// Second step for the platform owner: the code sent to their phone or email.
+function showLoginCode(challenge) {
+  const card = $('#auth .auth-card');
+  let current = challenge;
+  const draw = () => {
+    const [label, ic] = CODE_CHANNELS[current.channel];
+    card.innerHTML = `
+      <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
+      <h1>التحقق من هوية مالك المنصة</h1>
+      <div class="callout green">${icon(ic)}<div>أُرسل رمز الدخول عبر ${label} إلى <bdi dir="ltr">${esc(current.destination)}</bdi></div></div>
+      <form id="code-form" novalidate>
+        <div class="field"><label for="f-code">رمز الدخول</label>
+          <input id="f-code" class="otp" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" dir="ltr" required placeholder="••••••"></div>
+        <div class="form-error" role="alert"></div>
+        <button class="btn lg block" type="submit">تأكيد الدخول</button>
+      </form>
+      <div class="auth-links code-links">
+        <button type="button" class="link-btn" id="resend" disabled></button>
+        ${current.channels.filter((c) => c !== current.channel).map((c) => `<button type="button" class="link-btn" data-channel="${c}">
+          ${icon(CODE_CHANNELS[c][1])}الإرسال عبر ${CODE_CHANNELS[c][0]}</button>`).join('')}
+      </div>
+      <div class="signup-cta"><a href="#" id="back-login">العودة إلى تسجيل الدخول</a></div>`;
+    const form = $('#code-form', card);
+    const showError = (msg) => { $('.form-error', form).textContent = msg; };
+    form.elements.code.focus();
+    $('#back-login', card).addEventListener('click', (e) => { e.preventDefault(); showAuth(); });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = $('button[type=submit]', form);
+      btn.disabled = true;
+      try {
+        await api('POST', '/api/login/verify', { challenge: current.challenge, code: form.elements.code.value });
+        await enterApp();
+      } catch (err) {
+        showError(err.message);
+        if (/من جديد/.test(err.message)) setTimeout(() => showAuth(), 2500);
+      } finally {
+        if (btn.isConnected) btn.disabled = false;
+      }
+    });
+    // Resending (on the same or another channel) is allowed once a minute.
+    const links = $$('.code-links button', card);
+    const resend = $('#resend', card);
+    let left = 60;
+    const tick = () => {
+      if (!resend.isConnected) return;
+      links.forEach((b) => { b.disabled = left > 0; });
+      resend.textContent = left > 0 ? `إعادة الإرسال بعد ${left} ثانية` : 'إعادة إرسال الرمز';
+      if (left-- > 0) setTimeout(tick, 1000);
+    };
+    tick();
+    links.forEach((b) => b.addEventListener('click', async () => {
+      try {
+        current = await api('POST', '/api/login/resend', { challenge: current.challenge, channel: b.dataset.channel || current.channel });
+        toast('تم إرسال رمز جديد');
+        draw();
+      } catch (err) {
+        showError(err.message);
+      }
+    }));
+  };
+  draw();
 }
 
 async function enterApp() {

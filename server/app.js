@@ -11,15 +11,17 @@ const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
 function createApp(db, {
   publicDir = path.join(__dirname, '..', 'public'),
-  config = loadConfig(),
+  config: overrides = {},
   messenger = createMessenger(),
 } = {}) {
+  const config = { ...loadConfig(), ...overrides };
   const router = new Router();
   // For uptime checks and keep-awake pings: never touches the database.
   router.get('/api/health', () => ({ ok: true }), { public: true });
   // Which optional integrations are switched on, so the interface only offers what works.
   router.get('/api/client-config', () => ({
     otp: messenger.channels, uploads: !!config.cloudinary, signup: !!config.allowSignup, trial_days: config.trialDays,
+    storage_warning: !!config.ephemeralStorage,
   }), { public: true });
   require('./routes/users')(router);
   require('./routes/projects')(router);

@@ -7,6 +7,8 @@ const { openDatabase } = require('./db');
 const { createApp } = require('./app');
 const { startScheduler } = require('./scheduler');
 const { createMessenger } = require('./messaging');
+const { loadConfig } = require('./config');
+const { syncPlatformOwner } = require('./owner');
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -21,9 +23,14 @@ function databaseUrl() {
 async function main() {
   const url = databaseUrl();
   const db = await openDatabase(url, process.env.TURSO_AUTH_TOKEN);
+  const config = loadConfig();
+  if (config.ephemeralStorage) {
+    console.warn('WARNING: TURSO_DATABASE_URL is not set on Render — data is stored on a temporary disk and is LOST on every deploy.');
+  }
+  await syncPlatformOwner(db, config);
   const messenger = createMessenger();
   startScheduler(db, { messenger });
-  http.createServer(createApp(db, { messenger })).listen(PORT, () => {
+  http.createServer(createApp(db, { messenger, config })).listen(PORT, () => {
     const where = url.startsWith('file:') ? url : 'Turso';
     console.log(`Team management is running on http://localhost:${PORT} (database: ${where})`);
   });

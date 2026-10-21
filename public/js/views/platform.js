@@ -3,7 +3,7 @@
 import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal, confirmDialog, busy,
   PLAN_LABELS, PLAN_COLORS, ROLE_LABELS, countdown, periodUsed, fmtDate, fmtDateTime, relTime, kpi, avatar,
-  emptyState, remember, urgency,
+  emptyState, remember, urgency, creatorFields, bindCreatorFields,
 } from '../core.js';
 import { openWhatsApp, renewalReminderMessage } from '../whatsapp.js';
 import { EVENT_LABELS, seatsMeter } from './subscription.js';
@@ -62,6 +62,9 @@ export async function viewPlatform({ query }) {
       <div class="titles"><h1>لوحة إدارة المنصة</h1><div class="sub">الشركات المشتركة في منصة ابتكار واشتراكاتها وحساباتها</div></div>
       <div class="actions"><button class="btn" id="new-company">${icon('plus')}شركة جديدة</button></div>
     </div>
+    ${state.config.storage_warning ? `<div class="callout red">${icon('alert')}<div><b>تحذير: البيانات غير محفوظة بشكل دائم.</b>
+      قاعدة البيانات مخزّنة حاليًا على قرص الخادم المؤقت، ويُمحى محتواها مع كل تحديث أو إعادة تشغيل.
+      لحفظ البيانات بشكل دائم أضف المتغيرين <bdi dir="ltr">TURSO_DATABASE_URL</bdi> و<bdi dir="ltr">TURSO_AUTH_TOKEN</bdi> في إعدادات الخادم على Render.</div></div>` : ''}
     <section class="kpis">
       ${kpi(totals.companies, 'إجمالي الشركات', 'layers', 'navy')}
       ${kpi(totals.annual, 'اشتراكات سنوية فعّالة', 'shield')}
@@ -108,7 +111,8 @@ function newCompanyModal() {
         <div class="field hidden" data-for="trial"><label>مدة التجربة (بالأيام)</label><input name="days" type="number" min="1" max="365" value="30"></div>
         <div class="field"><label>عدد الحسابات <span class="hint">(فارغ = غير محدود)</span></label><input name="seats" type="number" min="1" value="10"></div>
       </div>
-      <h3>حساب مالك الشركة</h3>
+      <h3>الحساب الأول في الشركة</h3>
+      ${creatorFields('pc')}
       <div class="fields">
         <div class="field"><label>الاسم</label><input name="owner_name" required></div>
         <div class="field"><label>المسمى الوظيفي</label><input name="owner_job_title" placeholder="مثال: المدير العام"></div>
@@ -131,6 +135,7 @@ function newCompanyModal() {
   };
   form.elements.plan.addEventListener('change', sync);
   sync();
+  bindCreatorFields(form);
 }
 
 // ---------------------------------------------------------------------------
