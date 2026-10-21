@@ -170,6 +170,22 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- A company's own identity for its reports: colours, font (a web font or an uploaded file) and logo.
+CREATE TABLE IF NOT EXISTS company_brands (
+  company_id      INTEGER PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+  primary_color   TEXT NOT NULL DEFAULT '#06044B',
+  secondary_color TEXT NOT NULL DEFAULT '#5146E1',
+  accent_color    TEXT NOT NULL DEFAULT '#62E98A',
+  font            TEXT NOT NULL DEFAULT 'default',
+  font_name       TEXT NOT NULL DEFAULT '',
+  font_file       BLOB,
+  font_mime       TEXT,
+  logo            BLOB,
+  logo_mime       TEXT,
+  version         INTEGER NOT NULL DEFAULT 1,
+  updated_at      TEXT NOT NULL
+);
+
 -- Task and report photos kept in the database when Cloudinary is not configured (resized in the browser).
 CREATE TABLE IF NOT EXISTS images (
   id          TEXT PRIMARY KEY,

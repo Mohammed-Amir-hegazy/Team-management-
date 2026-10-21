@@ -10,6 +10,7 @@ const {
 const { normalizePhone, maskPhone } = require('../phone');
 const { assertDeletable, deleteAccount, deleteCompany, liveCompanyUsers } = require('../accounts');
 const { isPlatformEmail } = require('../owner');
+const { brandOf } = require('../brand');
 const crypto = require('node:crypto');
 const {
   accessOf, activeSeats, assertSeatAvailable, createCompany, platformAdmins, PLAN_LABELS,
@@ -268,6 +269,7 @@ module.exports = function register(router) {
       ends_at: user.company_ends_at,
       seats: user.company_seats,
       ...accessOf(user),
+      brand: await brandOf(db, user.company_id),
     };
     return { user: out };
   }, { ungated: true });

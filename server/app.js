@@ -31,6 +31,7 @@ function createApp(db, {
   require('./routes/notifications')(router);
   require('./routes/password')(router);
   require('./routes/uploads')(router);
+  require('./routes/brand')(router);
   require('./routes/subscription')(router);
   require('./routes/platform')(router);
 

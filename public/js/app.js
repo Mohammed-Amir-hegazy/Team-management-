@@ -15,6 +15,7 @@ import { viewNotifications } from './views/notifications.js';
 import { viewPlatform, viewCompany } from './views/platform.js';
 import { viewSubscription, subscriptionBanner } from './views/subscription.js';
 import { themeButton, themeSwitch } from './theme.js';
+import { viewBrand } from './views/brand.js';
 
 const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
@@ -342,6 +343,7 @@ function navItems() {
     me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
     ['people', me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users'],
     ['notifications', 'الإشعارات', 'bell', 'notifications'],
+    me.is_admin ? ['brand', 'هوية الشركة', 'palette'] : null,
     me.is_admin ? ['subscription', 'الاشتراك', 'shield'] : null,
   ].filter(Boolean);
 }
@@ -394,6 +396,7 @@ function moreSheet() {
       ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
       ${sheetItem('#/people', state.me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users')}
       ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
+      ${state.me.is_admin ? sheetItem('#/brand', 'هوية الشركة', 'palette') : ''}
       ${state.me.is_admin ? sheetItem('#/subscription', 'الاشتراك', 'shield') : ''}
       ${state.me.is_platform ? sheetItem('#/platform', 'لوحة إدارة المنصة', 'layers') : ''}
       <a class="item link" href="#" data-account>${icon('user')}<span class="grow">حسابي</span></a>
@@ -491,6 +494,7 @@ const routes = {
   people: viewPeople,
   notifications: viewNotifications,
   subscription: viewSubscription,
+  brand: viewBrand,
   platform: (p) => (p.sub ? viewCompany(p.sub) : viewPlatform(p)),
 };
 // Pages that stay reachable while the company's subscription is not active.

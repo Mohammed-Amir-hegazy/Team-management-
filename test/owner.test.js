@@ -207,3 +207,63 @@ test('photos are kept by the platform itself when Cloudinary is not configured',
   assert.equal((await a('DELETE', `/api/attachments/${shown[0].id}`)).status, 200);
   assert.equal((await fetch(base + up.data.url, { headers: { Cookie: mine } })).status, 404);
 });
+
+test('each company sets its own logo, colours and font for its reports', async () => {
+  const a = client();
+  await a('POST', '/api/signup', { company_name: 'Brandco', name: 'Brand Owner', email: 'o@brand.co', password: 'secret123' });
+  const me = (await a('GET', '/api/me')).data.user;
+  assert.equal(me.company.brand.primary_color, '#06044B', 'Ebtikar identity until changed');
+  assert.equal(me.company.brand.logo_url, null);
+
+  assert.equal((await a('PATCH', '/api/company/brand', { primary_color: 'red', secondary_color: '#112233', accent_color: '#445566', font: 'cairo' })).status, 400);
+  assert.equal((await a('PATCH', '/api/company/brand', { primary_color: '#aa0000', secondary_color: '#112233', accent_color: '#445566', font: 'comic' })).status, 400);
+  assert.equal((await a('PATCH', '/api/company/brand', { primary_color: '#aa0000', secondary_color: '#112233', accent_color: '#445566', font: 'custom' })).status, 400, 'no font file yet');
+  const saved = await a('PATCH', '/api/company/brand', { primary_color: '#aa0000', secondary_color: '#112233', accent_color: '#445566', font: 'cairo' });
+  assert.equal(saved.status, 200, JSON.stringify(saved.data));
+  assert.equal(saved.data.brand.primary_color, '#AA0000');
+  assert.equal(saved.data.brand.font_family, 'Cairo');
+
+  // Logo: real image types only (an SVG is fine, served so that it cannot run scripts).
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), Buffer.alloc(300, 1)]);
+  assert.equal((await a('POST', '/api/company/brand/logo', { data: `data:image/png;base64,${Buffer.from('<html>').toString('base64')}` })).status, 400);
+  const logo = await a('POST', '/api/company/brand/logo', { data: `data:image/png;base64,${png.toString('base64')}` });
+  assert.equal(logo.status, 200, JSON.stringify(logo.data));
+  assert.match(logo.data.brand.logo_url, /^\/api\/companies\/\d+\/brand\/logo\?v=\d+$/);
+  const svg = Buffer.from('<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const svgLogo = await a('POST', '/api/company/brand/logo', { data: `data:image/svg+xml;base64,${svg.toString('base64')}` });
+  assert.equal(svgLogo.status, 200);
+
+  // Font file: WOFF2/WOFF/TTF/OTF only.
+  assert.equal((await a('POST', '/api/company/brand/font', { data: `data:font/ttf;base64,${png.toString('base64')}`, name: 'x.ttf' })).status, 400);
+  const woff2 = Buffer.concat([Buffer.from('wOF2'), Buffer.alloc(200, 2)]);
+  const font = await a('POST', '/api/company/brand/font', { data: `data:font/woff2;base64,${woff2.toString('base64')}`, name: 'Brand Sans.woff2' });
+  assert.equal(font.status, 200, JSON.stringify(font.data));
+  assert.equal(font.data.brand.font, 'custom');
+  assert.equal(font.data.brand.font_family, 'Brand Sans');
+
+  // Served to the company itself only.
+  const login = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'o@brand.co', password: 'secret123' }) });
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const got = await fetch(base + svgLogo.data.brand.logo_url, { headers: { Cookie: cookie } });
+  assert.equal(got.status, 200);
+  assert.equal(got.headers.get('content-type'), 'image/svg+xml');
+  assert.match(got.headers.get('content-security-policy'), /sandbox/);
+  const f = await fetch(base + font.data.brand.font_url, { headers: { Cookie: cookie } });
+  assert.ok(Buffer.from(await f.arrayBuffer()).equals(woff2));
+  const other = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: 'o@pix.co', password: 'secret123' }) });
+  assert.equal((await fetch(base + svgLogo.data.brand.logo_url, { headers: { Cookie: other.headers.get('set-cookie').split(';')[0] } })).status, 404);
+
+  // Only owners and admins change it; anyone in the company sees it.
+  const emp = (await a('POST', '/api/users', { name: 'E', email: 'e@brand.co', password: 'secret123', roles: ['employee'], supervisor_id: me.id })).data.user;
+  const e = client();
+  await e('POST', '/api/login', { email: 'e@brand.co', password: 'secret123' });
+  assert.equal((await e('GET', '/api/me')).data.user.company.brand.primary_color, '#AA0000');
+  assert.equal((await e('PATCH', '/api/company/brand', { primary_color: '#000000', secondary_color: '#000000', accent_color: '#000000', font: 'default' })).status, 403);
+  assert.ok(emp.id);
+
+  // Removing the font goes back to the default font; resetting restores Ebtikar's identity.
+  assert.equal((await a('DELETE', '/api/company/brand/font')).data.brand.font, 'default');
+  const reset = await a('DELETE', '/api/company/brand');
+  assert.equal(reset.data.brand.primary_color, '#06044B');
+  assert.equal(reset.data.brand.logo_url, null);
+});

@@ -5,6 +5,7 @@ import {
 } from '../core.js';
 import { summaryPills } from './reports.js';
 import { buildXlsx, download } from '../xlsx.js';
+import { currentBrand, brandStyle, brandLogo, brandIssuer, loadBrandFont, workbookStyle } from '../brand.js';
 import { openReminder } from '../remind.js';
 
 const DAY = 24 * 3600 * 1000;
@@ -140,12 +141,14 @@ async function printReport(data) {
   const byMember = new Map(members.map((m) => [m.id, []]));
   for (const t of tasks) if (byMember.has(t.assignee_id)) byMember.get(t.assignee_id).push(t);
   const root = $('#print-root');
-  root.innerHTML = `<div class="doc">
+  const brand = currentBrand();
+  await loadBrandFont(brand);
+  root.innerHTML = `<div class="doc ${brand.custom ? 'branded' : ''}" style="${brandStyle(brand)}">
     <div class="doc-head">
       <div><h1>تقرير أداء الفريق</h1>
         <div>الفترة من ${esc(fmtDate(data.period.from))} إلى ${esc(fmtDate(data.period.to))}</div></div>
       <div>
-        <div class="brand">${mark()}<img src="/brand/wordmark-navy.svg" alt="EBTIKAR"></div>
+        <div class="brand">${brandLogo(brand, { onDark: false })}</div>
         <div class="meta">أعدّه: ${esc(data.generated_by.name)}${data.generated_by.job_title ? ` — ${esc(data.generated_by.job_title)}` : ''}<br>
           تاريخ الإصدار: ${esc(fmtDateTime(data.generated_at))}</div>
       </div>
@@ -184,7 +187,7 @@ async function printReport(data) {
     <h2>طلبات المتطلبات</h2>
     <p>إجمالي الطلبات: ${requests.total} — قيد الانتظار: ${requests.pending} — مقبولة: ${requests.approved} — مرفوضة: ${requests.rejected}</p>
 
-    <div class="foot">صادر عن منصة ابتكار لإدارة الأعمال — Ebtikar Software Solutions</div>
+    <div class="foot">${esc(brandIssuer(brand))} — Ebtikar Software Solutions</div>
   </div>`;
   await Promise.all($$('img', root).map((img) => img.decode().catch(() => {})));
   await document.fonts.ready;
@@ -200,6 +203,7 @@ async function printReport(data) {
 
 function teamWorkbook(data) {
   const { members, tasks, reports, totals } = data;
+  const brand = currentBrand();
   return buildXlsx([
     {
       name: 'معلومات التقرير',
@@ -207,6 +211,7 @@ function teamWorkbook(data) {
       rows: [
         ['البند', 'القيمة'],
         ['عنوان التقرير', 'تقرير أداء الفريق'],
+        ['الشركة', state.me.company.name || ''],
         ['الفترة', `من ${fmtDate(data.period.from)} إلى ${fmtDate(data.period.to)}`],
         ['أعدّه', data.generated_by.name],
         ['تاريخ الإصدار', fmtDateTime(data.generated_at)],
@@ -245,5 +250,5 @@ function teamWorkbook(data) {
           r.status_summary ? r.status_summary.blocked : '', r.status_summary ? r.status_summary.overdue : '']),
       ],
     },
-  ]);
+  ], workbookStyle(brand));
 }

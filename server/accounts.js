@@ -105,6 +105,7 @@ async function deleteCompany(db, companyId) {
       await tx.run(`DELETE FROM ${table} WHERE user_id IN (${inCompany})`, companyId);
     }
     await tx.run('DELETE FROM images WHERE company_id = ?', companyId);
+    await tx.run('DELETE FROM company_brands WHERE company_id = ?', companyId);
     await tx.run('DELETE FROM subscription_events WHERE company_id = ?', companyId);
     await tx.run('UPDATE subscription_events SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE company_id = ?)', companyId);
     await tx.run('UPDATE users SET supervisor_id = NULL WHERE company_id = ?', companyId);

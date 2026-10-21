@@ -5,6 +5,7 @@ import {
 } from '../core.js';
 import { uploadImages, pickImages, gallery, bindGallery, thumb, progressBar } from '../uploads.js';
 import { openWhatsApp, reportMessage } from '../whatsapp.js';
+import { currentBrand, brandStyle, brandLogo, brandIssuer, loadBrandFont } from '../brand.js';
 
 export function summaryPills(s) {
   if (!s) return '';
@@ -52,14 +53,14 @@ function teamTable(team) {
       <td class="num">${m.done}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-export function reportDocHtml(r, f = null) {
+export function reportDocHtml(r, f = null, brand = currentBrand()) {
   const base = f || r;
   const snap = base.snapshot;
   const images = [...(r.images || []), ...((f && f.images) || [])];
   const scope = base.task_id ? `المهمة: ${base.task_title}` : base.project_id ? base.project_name : 'جميع الأعمال';
-  return `<article class="report-doc">
-    <header class="rd-head">${mark('watermark')}
-      <div class="rd-brand"><img src="/brand/wordmark-white.svg" alt="EBTIKAR">${mark()}</div>
+  return `<article class="report-doc ${brand.custom ? 'branded' : ''}" style="${brandStyle(brand)}">
+    <header class="rd-head">${brand.logo_url ? '' : mark('watermark')}
+      <div class="rd-brand">${brandLogo(brand)}</div>
       <span class="rd-kind">${f ? 'تقرير مُحال' : 'تقرير حالة العمل'}</span>
       <h1>${esc(r.title)}</h1>
       <div class="sub">رقم التقرير ${r.id} · ${esc(fmtDateTime(r.created_at))}</div>
@@ -83,12 +84,13 @@ export function reportDocHtml(r, f = null) {
     ${snap && snap.team && snap.team.length ? `<section class="rd-section"><h2>ملخص الفريق</h2>${teamTable(snap.team)}</section>` : ''}
     ${r.reply ? `<section class="rd-section"><h2>ردّ ${esc(r.recipient_name)}</h2><div class="callout green">${icon('reply')}<div>
       <div class="pre">${esc(r.reply)}</div><div class="small">${esc(fmtDateTime(r.replied_at))}</div></div></div></section>` : ''}
-    <footer class="rd-foot"><span>صادر عن منصة ابتكار لإدارة الأعمال</span><span dir="ltr">Ebtikar Software Solutions</span></footer>
+    <footer class="rd-foot"><span>${esc(brandIssuer(brand))}</span><span dir="ltr">Ebtikar Software Solutions</span></footer>
   </article>`;
 }
 
 async function printReport(r, f) {
   const root = $('#print-root');
+  await loadBrandFont(currentBrand());
   root.innerHTML = reportDocHtml(r, f);
   await Promise.all($$('img', root).map((img) => img.decode().catch(() => {})));
   await document.fonts.ready;
@@ -278,6 +280,7 @@ export async function viewReport({ id, query }) {
     </div>
     ${reportDocHtml(r, f)}`);
   bindGallery(el);
+  loadBrandFont(currentBrand());
 
   $('#pdf', el).addEventListener('click', () => printReport(r, f));
   const wa = $('#wa', el);
