@@ -40,7 +40,7 @@ function personCard(u, admin) {
 
 export async function viewPeople() {
   const { users, can_manage_accounts: admin, seats } = await api('GET', '/api/users');
-  setTitle(admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي');
+  setTitle(admin ? 'المستخدمين' : 'الهيكل الوظيفي');
   const byId = new Map(users.map((u) => [u.id, u]));
   const children = new Map();
   const roots = [];
@@ -58,12 +58,12 @@ export async function viewPeople() {
 
   const el = render(`
     <div class="page-head">
-      <div class="titles"><h1>${admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي'}</h1>
+      <div class="titles"><h1>${admin ? 'المستخدمين' : 'الهيكل الوظيفي'}</h1>
         <div class="sub">${admin && seats.total ? `${seats.used} من ${seats.total} حسابات مستخدمة في باقتكم` : `${active} حساب نشط`} · تُرسل التقارير والطلبات إلى المسؤول المباشر فقط</div></div>
-      <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة موظف</button>` : ''}</div>
+      <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة مستخدم</button>` : ''}</div>
     </div>
     ${!admin ? `<div class="callout blue">${icon('shield')}<div>إنشاء الحسابات وتعديل الأدوار من صلاحيات صاحب الشركة ومسؤول النظام.</div></div>` : ''}
-    ${admin && !users.some((u) => u.role === 'owner' && u.active) ? `<div class="callout amber">${icon('alert')}<div>لم يُضف حساب صاحب الشركة بعد. يمكنك إضافته من «إضافة موظف» باختيار دور «صاحب الشركة»، وسيتبعه من هم في قمة الهيكل حاليًا.</div></div>` : ''}
+    ${admin && !users.some((u) => u.role === 'owner' && u.active) ? `<div class="callout amber">${icon('alert')}<div>لم يُضف حساب صاحب الشركة بعد. يمكنك إضافته من «إضافة مستخدم» باختيار دور «صاحب الشركة»، وسيتبعه من هم في قمة الهيكل حاليًا.</div></div>` : ''}
     <div class="toolbar"><div class="input-icon">${icon('search')}<input id="q" type="search" placeholder="ابحث بالاسم أو المسمى الوظيفي"></div></div>
     <section class="card">
       <div class="org" id="org"><ul>${roots.map(tree).join('')}</ul></div>
@@ -95,7 +95,7 @@ export async function viewPeople() {
   if (admin) {
     const add = () => userModal(users, null);
     $('#add-user', el).addEventListener('click', add);
-    setFab('إضافة موظف', add);
+    setFab('إضافة مستخدم', add);
   } else {
     setFab(null);
   }
@@ -126,7 +126,7 @@ function userModal(users, user) {
     .join('');
 
   const { form } = openModal({
-    title: editing ? `تعديل بيانات ${user.name}` : 'إضافة موظف جديد',
+    title: editing ? `تعديل بيانات ${user.name}` : 'إضافة مستخدم جديد',
     wide: true,
     body: `
       <div class="fields">

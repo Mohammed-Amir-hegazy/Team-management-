@@ -340,7 +340,7 @@ function navItems() {
     ['reports', 'التقارير', 'report', 'reports'],
     ['requests', 'الطلبات', 'box', 'requests'],
     me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
-    ['people', me.is_admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي', 'users'],
+    ['people', me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users'],
     ['notifications', 'الإشعارات', 'bell', 'notifications'],
     me.is_admin ? ['subscription', 'الاشتراك', 'shield'] : null,
   ].filter(Boolean);
@@ -392,7 +392,7 @@ function moreSheet() {
     body: `<div class="list">
       ${sheetItem('#/requests', 'الطلبات', 'box', badge(c.requests))}
       ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
-      ${sheetItem('#/people', state.me.is_admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي', 'users')}
+      ${sheetItem('#/people', state.me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users')}
       ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
       ${state.me.is_admin ? sheetItem('#/subscription', 'الاشتراك', 'shield') : ''}
       ${state.me.is_platform ? sheetItem('#/platform', 'لوحة إدارة المنصة', 'layers') : ''}
