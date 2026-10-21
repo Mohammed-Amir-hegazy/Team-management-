@@ -5,11 +5,15 @@
 const { HttpError } = require('./http');
 const { now } = require('./db');
 
-const ROLES = ['owner', 'manager', 'team_leader', 'employee'];
+// Organisational levels, highest first. A user's `role` column holds their highest level;
+// `roles` holds every role they carry, including the non-hierarchical system admin.
+const ORG_ROLES = ['owner', 'manager', 'team_leader', 'employee'];
+const ROLES = [...ORG_ROLES, 'admin'];
 const ROLE_LABELS = {
   owner: 'صاحب الشركة',
+  admin: 'مسؤول النظام',
   manager: 'مدير',
-  team_leader: 'تيم ليدر',
+  team_leader: 'قائد فريق',
   employee: 'موظف',
 };
 const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'review', 'done'];
@@ -24,7 +28,21 @@ const PROJECT_STATUSES = ['active', 'on_hold', 'completed'];
 const PRIORITIES = ['low', 'medium', 'high'];
 
 function roleRank(role) {
-  return ROLES.indexOf(role);
+  return ORG_ROLES.indexOf(role);
+}
+
+function userRoles(user) {
+  return String(user.roles || user.role).split(',').filter((r) => ROLES.includes(r));
+}
+
+// The owner and system admins manage accounts (create, edit roles, suspend).
+function isAdmin(user) {
+  const roles = userRoles(user);
+  return roles.includes('owner') || roles.includes('admin');
+}
+
+function primaryRole(roles) {
+  return ORG_ROLES.find((r) => roles.includes(r)) || null;
 }
 
 function getUser(db, userId) {
@@ -68,11 +86,11 @@ async function isSelfOrBelow(db, user, otherId) {
 
 async function requireSupervisor(db, user) {
   if (!user.supervisor_id) {
-    throw new HttpError(400, 'لا يوجد مسؤول أعلى منك لإرسال هذا إليه');
+    throw new HttpError(400, 'لا يوجد مسؤول مباشر أعلى منك لإرسال هذا إليه');
   }
   const supervisor = await getUser(db, user.supervisor_id);
   if (!supervisor || !supervisor.active) {
-    throw new HttpError(400, 'المسؤول المباشر عنك غير متاح حالياً');
+    throw new HttpError(400, 'المسؤول المباشر عنك غير متاح حاليًا');
   }
   return supervisor;
 }
@@ -126,9 +144,9 @@ async function loadProject(db, user, projectId) {
 
 async function loadTask(db, user, taskId) {
   const task = await db.get('SELECT * FROM tasks WHERE id = ?', taskId);
-  if (!task) throw new HttpError(404, 'التاسك غير موجودة');
+  if (!task) throw new HttpError(404, 'المهمة غير موجودة');
   const project = await db.get('SELECT * FROM projects WHERE id = ?', task.project_id);
-  if (!(await canSeeProject(db, user, project))) throw new HttpError(404, 'التاسك غير موجودة');
+  if (!(await canSeeProject(db, user, project))) throw new HttpError(404, 'المهمة غير موجودة');
   return { task, project };
 }
 
@@ -179,12 +197,17 @@ function notify(db, userId, type, message, link = '') {
 
 function publicUser(user) {
   if (!user) return null;
+  const roles = userRoles(user);
   return {
     id: user.id,
     name: user.name,
     email: user.email,
+    job_title: user.job_title || '',
     role: user.role,
     role_label: ROLE_LABELS[user.role],
+    roles,
+    role_labels: roles.map((r) => ROLE_LABELS[r]),
+    is_admin: isAdmin(user),
     supervisor_id: user.supervisor_id,
     active: !!user.active,
     created_at: user.created_at,
@@ -192,6 +215,7 @@ function publicUser(user) {
 }
 
 module.exports = {
+  ORG_ROLES,
   ROLES,
   ROLE_LABELS,
   TASK_STATUSES,
@@ -199,6 +223,9 @@ module.exports = {
   PROJECT_STATUSES,
   PRIORITIES,
   roleRank,
+  userRoles,
+  isAdmin,
+  primaryRole,
   getUser,
   subordinateIds,
   ancestorIds,

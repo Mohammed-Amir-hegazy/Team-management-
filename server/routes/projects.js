@@ -38,13 +38,13 @@ module.exports = function register(router) {
   });
 
   router.post('/api/projects', async ({ db, user, body }) => {
-    if (user.role === 'employee') throw new HttpError(403, 'الموظف لا يمكنه إنشاء مشروع');
+    if (user.role === 'employee') throw new HttpError(403, 'إنشاء المشاريع متاح للمديرين وقادة الفرق وصاحب الشركة فقط');
     const name = v.text(body.name, 'اسم المشروع', { max: 200 });
     const description = v.text(body.description, 'الوصف', { required: false, max: 5000 });
     const memberIds = Array.isArray(body.member_ids) ? body.member_ids.map((x) => v.id(x, 'العضو')) : [];
     const subs = await subordinateIds(db, user.id);
     for (const mid of memberIds) {
-      if (mid !== user.id && !subs.has(mid)) throw new HttpError(403, 'تقدر تضيف بس الناس اللي تحتك');
+      if (mid !== user.id && !subs.has(mid)) throw new HttpError(403, 'يمكنك إضافة أعضاء فريقك فقط');
     }
     const id = await db.transaction(async (tx) => {
       const r = await tx.run('INSERT INTO projects (name, description, created_by, created_at) VALUES (?, ?, ?, ?)',
@@ -53,7 +53,7 @@ module.exports = function register(router) {
       await addProjectMember(tx, projectId, user.id);
       for (const mid of memberIds) {
         await addProjectMember(tx, projectId, mid);
-        if (mid !== user.id) await notify(tx, mid, 'project', `تمت إضافتك لمشروع "${name}"`, `#/projects/${projectId}`);
+        if (mid !== user.id) await notify(tx, mid, 'project', `تمت إضافتك إلى مشروع «${name}»`, `#/projects/${projectId}`);
       }
       return projectId;
     });
@@ -109,7 +109,7 @@ module.exports = function register(router) {
 
   router.patch('/api/projects/:id', async ({ db, user, params, body }) => {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
-    if (!canManageProject(user, project)) throw new HttpError(403, 'غير مسموح');
+    if (!canManageProject(user, project)) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
     const name = body.name !== undefined ? v.text(body.name, 'اسم المشروع', { max: 200 }) : project.name;
     const description = body.description !== undefined
       ? v.text(body.description, 'الوصف', { required: false, max: 5000 }) : project.description;
@@ -121,7 +121,7 @@ module.exports = function register(router) {
 
   router.delete('/api/projects/:id', async ({ db, user, params }) => {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
-    if (!canManageProject(user, project)) throw new HttpError(403, 'غير مسموح');
+    if (!canManageProject(user, project)) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
     await db.transaction((tx) => deleteProject(tx, project.id));
     return { ok: true };
   });
@@ -131,13 +131,13 @@ module.exports = function register(router) {
     const memberId = v.id(body.user_id, 'العضو');
     const allowed = canManageProject(user, project)
       || ((await isProjectMember(db, project.id, user.id)) && user.role !== 'employee');
-    if (!allowed) throw new HttpError(403, 'غير مسموح');
-    if (!(await isSelfOrBelow(db, user, memberId))) throw new HttpError(403, 'تقدر تضيف بس الناس اللي تحتك');
+    if (!allowed) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
+    if (!(await isSelfOrBelow(db, user, memberId))) throw new HttpError(403, 'يمكنك إضافة أعضاء فريقك فقط');
     const member = await getUser(db, memberId);
     if (!member || !member.active) throw new HttpError(404, 'المستخدم غير موجود');
     await addProjectMember(db, project.id, memberId);
     if (memberId !== user.id) {
-      await notify(db, memberId, 'project', `تمت إضافتك لمشروع "${project.name}"`, `#/projects/${project.id}`);
+      await notify(db, memberId, 'project', `تمت إضافتك إلى مشروع «${project.name}»`, `#/projects/${project.id}`);
     }
     return { ok: true };
   });
@@ -146,12 +146,12 @@ module.exports = function register(router) {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
     const memberId = v.id(params.userId, 'العضو');
     if (!canManageProject(user, project) && !(await subordinateIds(db, user.id)).has(memberId)) {
-      throw new HttpError(403, 'غير مسموح');
+      throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
     }
     if (memberId === project.created_by) throw new HttpError(400, 'لا يمكن إزالة منشئ المشروع');
     const { n } = await db.get("SELECT COUNT(*) AS n FROM tasks WHERE project_id = ? AND assignee_id = ? AND status != 'done'",
       project.id, memberId);
-    if (n > 0) throw new HttpError(400, 'العضو عليه تاسكات مفتوحة في المشروع، انقلها لحد تاني الأول');
+    if (n > 0) throw new HttpError(400, 'لدى هذا العضو مهام مفتوحة في المشروع؛ يُرجى إسنادها إلى عضو آخر أولًا');
     await db.run('DELETE FROM project_members WHERE project_id = ? AND user_id = ?', project.id, memberId);
     return { ok: true };
   });

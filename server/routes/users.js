@@ -5,35 +5,56 @@ const { now } = require('../db');
 const v = require('../validate');
 const auth = require('../auth');
 const {
-  ROLES, roleRank, getUser, subordinateIds, ancestorIds, publicUser,
+  ROLES, roleRank, userRoles, isAdmin, primaryRole, getUser, subordinateIds, ancestorIds, publicUser,
 } = require('../access');
+
+const NOT_ALLOWED = 'ليست لديك صلاحية لتنفيذ هذا الإجراء';
 
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 6) {
-    throw new HttpError(400, 'كلمة المرور لازم تكون 6 حروف على الأقل');
+    throw new HttpError(400, 'يجب ألا تقل كلمة المرور عن ستة أحرف');
   }
   return password;
 }
 
-async function insertUser(db, { name, email, password, role, supervisorId }) {
-  if (await db.get('SELECT 1 FROM users WHERE email = ?', email)) {
-    throw new HttpError(409, 'البريد الإلكتروني مستخدم بالفعل');
-  }
-  const result = await db.run(`
-    INSERT INTO users (name, email, password_hash, role, supervisor_id, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `, name, email, auth.hashPassword(password), role, supervisorId, now());
-  return getUser(db, result.lastInsertRowid);
+function validateEmail(value) {
+  const email = v.text(value, 'البريد الإلكتروني', { max: 200 }).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, 'صيغة البريد الإلكتروني غير صحيحة');
+  return email;
 }
 
-function readUserFields(body) {
-  const email = v.text(body.email, 'البريد الإلكتروني', { max: 200 }).toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, 'البريد الإلكتروني غير صحيح');
-  return {
-    name: v.text(body.name, 'الاسم', { max: 120 }),
-    email,
-    password: validatePassword(body.password),
-  };
+// Roles chosen by an admin: any mix except "owner", with at least one organisational level.
+function validateRoles(value) {
+  if (!Array.isArray(value)) throw new HttpError(400, 'يجب اختيار دور واحد على الأقل');
+  const roles = [...new Set(value)];
+  for (const r of roles) {
+    if (!ROLES.includes(r) || r === 'owner') throw new HttpError(400, 'أحد الأدوار المختارة غير صالح');
+  }
+  if (!primaryRole(roles)) throw new HttpError(400, 'يجب اختيار مستوى وظيفي واحد على الأقل (مدير أو قائد فريق أو موظف)');
+  return roles;
+}
+
+async function emailTaken(db, email, exceptId = 0) {
+  return !!(await db.get('SELECT 1 FROM users WHERE email = ? AND id != ?', email, exceptId));
+}
+
+// A supervisor must sit at a higher level, and nobody may end up supervising themselves.
+async function checkPlacement(db, { userId = null, level, supervisorId }) {
+  const supervisor = await getUser(db, supervisorId);
+  if (!supervisor || !supervisor.active) throw new HttpError(400, 'المسؤول المباشر المحدد غير موجود');
+  if (roleRank(supervisor.role) >= roleRank(level)) {
+    throw new HttpError(400, 'يجب أن يكون المسؤول المباشر في مستوى وظيفي أعلى');
+  }
+  if (userId) {
+    if (supervisorId === userId || (await subordinateIds(db, userId)).has(supervisorId)) {
+      throw new HttpError(400, 'لا يمكن أن يكون المسؤول المباشر أحد مرؤوسي هذا المستخدم');
+    }
+    const reports = await db.all('SELECT role FROM users WHERE supervisor_id = ? AND active = 1', userId);
+    if (reports.some((r) => roleRank(r.role) <= roleRank(level))) {
+      throw new HttpError(400, 'يوجد مرؤوسون لهذا المستخدم في مستوى مساوٍ أو أعلى من المستوى الجديد؛ يُرجى نقلهم أولًا');
+    }
+  }
+  return supervisor;
 }
 
 async function withSupervisorName(db, user) {
@@ -49,13 +70,20 @@ module.exports = function register(router) {
     return { needsSetup: n === 0 };
   }, { public: true });
 
-  // First run only: creates the company owner.
+  // First run only: creates the company owner, who is also the first system admin.
   router.post('/api/setup', async ({ db, body, res }) => {
-    const fields = readUserFields(body);
+    const name = v.text(body.name, 'الاسم', { max: 120 });
+    const email = validateEmail(body.email);
+    const password = validatePassword(body.password);
+    const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
     const user = await db.transaction(async (tx) => {
       const { n } = await tx.get('SELECT EXISTS (SELECT 1 FROM users) AS n');
-      if (n > 0) throw new HttpError(409, 'تم إعداد النظام بالفعل');
-      return insertUser(tx, { ...fields, role: 'owner', supervisorId: null });
+      if (n > 0) throw new HttpError(409, 'تم إعداد النظام مسبقًا');
+      const r = await tx.run(`
+        INSERT INTO users (name, email, password_hash, role, roles, job_title, supervisor_id, created_at)
+        VALUES (?, ?, ?, 'owner', 'owner', ?, NULL, ?)
+      `, name, email, auth.hashPassword(password), jobTitle, now());
+      return getUser(tx, r.lastInsertRowid);
     });
     res.setHeader('Set-Cookie', auth.sessionCookie(await auth.createSession(db, user.id)));
     return { user: await withSupervisorName(db, user) };
@@ -68,7 +96,7 @@ module.exports = function register(router) {
     if (!user || !auth.verifyPassword(password, user.password_hash)) {
       throw new HttpError(401, 'البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
-    if (!user.active) throw new HttpError(403, 'هذا الحساب موقوف');
+    if (!user.active) throw new HttpError(403, 'هذا الحساب موقوف، يُرجى التواصل مع مسؤول النظام');
     res.setHeader('Set-Cookie', auth.sessionCookie(await auth.createSession(db, user.id)));
     return { user: await withSupervisorName(db, user) };
   }, { public: true });
@@ -79,7 +107,11 @@ module.exports = function register(router) {
     return { ok: true };
   }, { public: true });
 
-  router.get('/api/me', async ({ db, user }) => ({ user: await withSupervisorName(db, user) }));
+  router.get('/api/me', async ({ db, user }) => {
+    const out = await withSupervisorName(db, user);
+    out.has_team = (await subordinateIds(db, user.id)).size > 0 || user.role === 'owner';
+    return { user: out };
+  });
 
   router.post('/api/me/password', async ({ db, user, body }) => {
     if (!auth.verifyPassword(String(body.current_password || ''), user.password_hash)) {
@@ -90,12 +122,13 @@ module.exports = function register(router) {
     return { ok: true };
   });
 
-  // People this user may see: their supervisor chain, themselves and everyone below them.
+  // Admins see everyone; others see their supervisor chain, themselves and everyone below them.
   router.get('/api/users', async ({ db, user }) => {
+    const admin = isAdmin(user);
     const subs = await subordinateIds(db, user.id);
     const all = await db.all('SELECT * FROM users');
     let visible = all;
-    if (user.role !== 'owner') {
+    if (!admin && user.role !== 'owner') {
       const ids = new Set([user.id, ...(await ancestorIds(db, user.id)), ...subs]);
       visible = all.filter((u) => ids.has(u.id));
     }
@@ -103,53 +136,80 @@ module.exports = function register(router) {
     const users = visible.map((u) => ({
       ...publicUser(u),
       supervisor_name: names.get(u.supervisor_id) || null,
-      manageable: subs.has(u.id),
+      in_my_team: subs.has(u.id),
+      manageable: admin && (u.role !== 'owner' || u.id === user.id),
     }));
     users.sort((a, b) => roleRank(a.role) - roleRank(b.role) || a.name.localeCompare(b.name, 'ar'));
-    return { users };
+    return { users, can_manage_accounts: admin };
   });
 
-  // Supervisors create people below them. A supervisor must be exactly one level above.
+  // Only the owner and system admins create accounts.
   router.post('/api/users', async ({ db, user, body }) => {
-    const fields = readUserFields(body);
-    const role = v.oneOf(body.role, ROLES.slice(1), 'الدور');
-    if (roleRank(role) <= roleRank(user.role)) {
-      throw new HttpError(403, 'لا يمكنك إضافة شخص في نفس مستواك أو أعلى منك');
-    }
-    const supervisorId = v.id(body.supervisor_id ?? user.id, 'المسؤول المباشر');
-    const supervisor = await getUser(db, supervisorId);
-    if (!supervisor || !supervisor.active) throw new HttpError(400, 'المسؤول المباشر غير موجود');
-    if (roleRank(supervisor.role) !== roleRank(role) - 1) {
-      throw new HttpError(400, 'المسؤول المباشر لازم يكون في المستوى اللي فوقه مباشرة');
-    }
-    if (supervisorId !== user.id && !(await subordinateIds(db, user.id)).has(supervisorId)) {
-      throw new HttpError(403, 'المسؤول المباشر لازم يكون أنت أو حد تحتك');
-    }
-    const created = await insertUser(db, { ...fields, role, supervisorId });
-    return { user: await withSupervisorName(db, created) };
+    if (!isAdmin(user)) throw new HttpError(403, 'إنشاء الحسابات متاح لصاحب الشركة ومسؤول النظام فقط');
+    const name = v.text(body.name, 'الاسم', { max: 120 });
+    const email = validateEmail(body.email);
+    const password = validatePassword(body.password);
+    const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+    const roles = validateRoles(body.roles);
+    const level = primaryRole(roles);
+    const supervisorId = v.id(body.supervisor_id, 'المسؤول المباشر');
+    await checkPlacement(db, { level, supervisorId });
+    if (await emailTaken(db, email)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
+
+    const r = await db.run(`
+      INSERT INTO users (name, email, password_hash, role, roles, job_title, supervisor_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, supervisorId, now());
+    return { user: await withSupervisorName(db, await getUser(db, r.lastInsertRowid)) };
   });
 
-  // Anyone above a user can rename, reset password, or suspend/reactivate them.
   router.patch('/api/users/:id', async ({ db, user, params, body }) => {
-    const targetId = v.id(params.id, 'المستخدم');
-    if (!(await subordinateIds(db, user.id)).has(targetId)) throw new HttpError(403, 'غير مسموح');
-    if (body.name !== undefined) {
-      await db.run('UPDATE users SET name = ? WHERE id = ?', v.text(body.name, 'الاسم', { max: 120 }), targetId);
+    if (!isAdmin(user)) throw new HttpError(403, 'إدارة الحسابات متاحة لصاحب الشركة ومسؤول النظام فقط');
+    const target = await getUser(db, v.id(params.id, 'المستخدم'));
+    if (!target) throw new HttpError(404, 'المستخدم غير موجود');
+    const isOwner = target.role === 'owner';
+    if (isOwner && target.id !== user.id) throw new HttpError(403, 'لا يمكن تعديل حساب صاحب الشركة إلا من قِبله');
+
+    const next = { ...target };
+    if (body.name !== undefined) next.name = v.text(body.name, 'الاسم', { max: 120 });
+    if (body.job_title !== undefined) next.job_title = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+    if (body.email !== undefined) {
+      next.email = validateEmail(body.email);
+      if (await emailTaken(db, next.email, target.id)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
     }
-    if (body.password !== undefined) {
-      await db.run('UPDATE users SET password_hash = ? WHERE id = ?',
-        auth.hashPassword(validatePassword(body.password)), targetId);
-      await db.run('DELETE FROM sessions WHERE user_id = ?', targetId);
-    }
-    if (body.active !== undefined) {
-      const active = body.active ? 1 : 0;
-      if (!active) {
-        const { n } = await db.get('SELECT COUNT(*) AS n FROM users WHERE supervisor_id = ? AND active = 1', targetId);
-        if (n > 0) throw new HttpError(400, 'لازم تنقل أو توقف الأشخاص اللي تحته الأول');
-        await db.run('DELETE FROM sessions WHERE user_id = ?', targetId);
+
+    if (!isOwner && (body.roles !== undefined || body.supervisor_id !== undefined)) {
+      const roles = body.roles !== undefined ? validateRoles(body.roles) : userRoles(target);
+      if (target.id === user.id && !roles.includes('admin')) {
+        throw new HttpError(400, 'لا يمكنك إزالة صلاحية مسؤول النظام من حسابك');
       }
-      await db.run('UPDATE users SET active = ? WHERE id = ?', active, targetId);
+      next.roles = roles.join(',');
+      next.role = primaryRole(roles);
+      next.supervisor_id = body.supervisor_id !== undefined ? v.id(body.supervisor_id, 'المسؤول المباشر') : target.supervisor_id;
+      await checkPlacement(db, { userId: target.id, level: next.role, supervisorId: next.supervisor_id });
     }
-    return { user: await withSupervisorName(db, await getUser(db, targetId)) };
+
+    if (body.active !== undefined && !isOwner) {
+      next.active = body.active ? 1 : 0;
+      if (!next.active) {
+        if (target.id === user.id) throw new HttpError(400, 'لا يمكنك إيقاف حسابك');
+        const { n } = await db.get('SELECT COUNT(*) AS n FROM users WHERE supervisor_id = ? AND active = 1', target.id);
+        if (n > 0) throw new HttpError(400, 'لهذا المستخدم مرؤوسون نشطون؛ يُرجى نقلهم إلى مسؤول آخر أولًا');
+      }
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.run(`
+        UPDATE users SET name = ?, email = ?, job_title = ?, role = ?, roles = ?, supervisor_id = ?, active = ?
+        WHERE id = ?
+      `, next.name, next.email, next.job_title, next.role, next.roles, next.supervisor_id, next.active, target.id);
+      if (body.password !== undefined && body.password !== '') {
+        await tx.run('UPDATE users SET password_hash = ? WHERE id = ?',
+          auth.hashPassword(validatePassword(body.password)), target.id);
+        if (target.id !== user.id) await tx.run('DELETE FROM sessions WHERE user_id = ?', target.id);
+      }
+      if (!next.active) await tx.run('DELETE FROM sessions WHERE user_id = ?', target.id);
+    });
+    return { user: await withSupervisorName(db, await getUser(db, target.id)) };
   });
 };

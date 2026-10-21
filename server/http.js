@@ -51,7 +51,7 @@ function readJson(req) {
     req.on('data', (chunk) => {
       size += chunk.length;
       if (size > MAX_BODY) {
-        reject(new HttpError(413, 'حجم البيانات أكبر من المسموح'));
+        reject(new HttpError(413, 'حجم البيانات المرسلة أكبر من الحد المسموح به'));
         req.destroy();
         return;
       }
@@ -100,6 +100,7 @@ const MIME = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
 };
 
 function serveStatic(res, publicDir, pathname) {
@@ -114,7 +115,9 @@ function serveStatic(res, publicDir, pathname) {
     filePath = path.join(root, 'index.html');
   }
   const type = MIME[path.extname(filePath)] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-cache' });
+  // Fonts and brand images never change in place, so let browsers keep them for a week.
+  const longLived = /[\\/](fonts|brand)[\\/]/.test(filePath);
+  res.writeHead(200, { 'Content-Type': type, 'Cache-Control': longLived ? 'public, max-age=604800' : 'no-cache' });
   fs.createReadStream(filePath).pipe(res);
 }
 

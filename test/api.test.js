@@ -56,12 +56,13 @@ async function login(email) {
 const people = {};
 let owner, manager, leader, employee, otherLeader;
 
-test('setup and hierarchy', async (t) => {
+test('setup, accounts and hierarchy', async (t) => {
   owner = client();
   assert.equal((await owner('GET', '/api/setup-status')).data.needsSetup, true);
-  const r = await owner('POST', '/api/setup', { name: 'Owner', email: 'owner@x.com', password: 'secret123' });
+  const r = await owner('POST', '/api/setup', { name: 'Owner', email: 'owner@x.com', password: 'secret123', job_title: 'CEO' });
   assert.equal(r.status, 200);
   people.owner = r.data.user;
+  assert.ok(people.owner.is_admin);
   assert.equal((await owner('POST', '/api/setup', { name: 'B', email: 'b@x.com', password: 'secret123' })).status, 409);
 
   const add = async (c, body) => {
@@ -69,38 +70,55 @@ test('setup and hierarchy', async (t) => {
     assert.equal(res.status, 200, JSON.stringify(res.data));
     return res.data.user;
   };
-  people.manager = await add(owner, { name: 'Manager', email: 'm@x.com', role: 'manager' });
-
-  await t.test('supervisor must be exactly one level up', async () => {
-    const bad = await owner('POST', '/api/users', {
-      name: 'E', email: 'e0@x.com', password: 'secret123', role: 'employee', supervisor_id: people.manager.id,
-    });
-    assert.equal(bad.status, 400);
-  });
-
+  people.manager = await add(owner, { name: 'Manager', email: 'm@x.com', roles: ['manager'], supervisor_id: people.owner.id, job_title: 'مدير العمليات' });
+  people.leader = await add(owner, { name: 'Leader', email: 'l@x.com', roles: ['team_leader', 'employee'], supervisor_id: people.manager.id, job_title: 'Frontend Lead' });
+  people.otherLeader = await add(owner, { name: 'Other Leader', email: 'l2@x.com', roles: ['team_leader'], supervisor_id: people.manager.id });
+  people.employee = await add(owner, { name: 'Employee', email: 'e@x.com', roles: ['employee'], supervisor_id: people.leader.id, job_title: 'مصمم واجهات' });
   manager = await login('m@x.com');
-  people.leader = await add(manager, { name: 'Leader', email: 'l@x.com', role: 'team_leader' });
-  people.otherLeader = await add(manager, { name: 'Other Leader', email: 'l2@x.com', role: 'team_leader' });
-
-  await t.test('cannot create someone at or above own level', async () => {
-    const bad = await manager('POST', '/api/users', { name: 'X', email: 'x@x.com', password: 'secret123', role: 'manager' });
-    assert.equal(bad.status, 403);
-  });
-
   leader = await login('l@x.com');
   otherLeader = await login('l2@x.com');
-  people.employee = await add(leader, { name: 'Employee', email: 'e@x.com', role: 'employee' });
   employee = await login('e@x.com');
 
-  await t.test('leader cannot place an employee under another leader', async () => {
-    const bad = await leader('POST', '/api/users', {
-      name: 'Y', email: 'y@x.com', password: 'secret123', role: 'employee', supervisor_id: people.otherLeader.id,
+  await t.test('several roles and a job title per person', () => {
+    assert.deepEqual(people.leader.roles, ['team_leader', 'employee']);
+    assert.equal(people.leader.role, 'team_leader');
+    assert.equal(people.employee.job_title, 'مصمم واجهات');
+  });
+
+  await t.test('only the owner or a system admin creates accounts', async () => {
+    const bad = await manager('POST', '/api/users', {
+      name: 'X', email: 'x@x.com', password: 'secret123', roles: ['employee'], supervisor_id: people.manager.id,
     });
     assert.equal(bad.status, 403);
+    const it = await add(owner, { name: 'IT', email: 'it@x.com', roles: ['employee', 'admin'], supervisor_id: people.leader.id });
+    const itClient = await login('it@x.com');
+    const made = await itClient('POST', '/api/users', {
+      name: 'Y', email: 'y@x.com', password: 'secret123', roles: ['employee'], supervisor_id: people.otherLeader.id,
+    });
+    assert.equal(made.status, 200);
+    assert.equal((await itClient('PATCH', `/api/users/${people.owner.id}`, { name: 'Hacked' })).status, 403);
+    assert.equal((await owner('PATCH', `/api/users/${made.data.user.id}`, { active: false })).status, 200);
+    assert.equal((await owner('PATCH', `/api/users/${it.id}`, { active: false })).status, 200);
+  });
+
+  await t.test('supervisor must be at a higher level and never below', async () => {
+    const same = await owner('POST', '/api/users', {
+      name: 'E', email: 'e0@x.com', password: 'secret123', roles: ['team_leader'], supervisor_id: people.leader.id,
+    });
+    assert.equal(same.status, 400);
+    const noLevel = await owner('POST', '/api/users', {
+      name: 'E', email: 'e1@x.com', password: 'secret123', roles: ['admin'], supervisor_id: people.leader.id,
+    });
+    assert.equal(noLevel.status, 400);
+    // Demoting the manager below their own team leaders is refused.
+    const demote = await owner('PATCH', `/api/users/${people.manager.id}`, { roles: ['employee'] });
+    assert.equal(demote.status, 400);
   });
 
   const me = await employee('GET', '/api/me');
   assert.equal(me.data.user.supervisor_name, 'Leader');
+  assert.equal(me.data.user.has_team, false);
+  assert.equal((await leader('GET', '/api/me')).data.user.has_team, true);
 });
 
 let project;
@@ -175,7 +193,11 @@ test('reports only go to the direct supervisor', async () => {
   const reportId = ok.data.report.id;
 
   assert.equal((await manager('GET', '/api/reports')).data.reports.length, 0);
-  assert.equal((await manager('GET', `/api/reports/${reportId}`)).status, 404);
+  // Not in the manager's inbox, but readable by them (read-only) since the sender is in their team.
+  const managerView = await manager('GET', `/api/reports/${reportId}`);
+  assert.equal(managerView.status, 200);
+  assert.equal(managerView.data.permissions.reply, false);
+  assert.equal((await otherLeader('GET', `/api/reports/${reportId}`)).status, 404);
 
   const inbox = await leader('GET', '/api/reports');
   assert.equal(inbox.data.reports.length, 1);
@@ -290,4 +312,43 @@ test('deleting a task and a project removes everything under them', async () => 
   // The report survives, just detached from the deleted task.
   const sentReports = await employee('GET', '/api/reports?box=sent');
   assert.ok(sentReports.data.reports.some((r) => r.title === 'r' && r.task_id === null));
+});
+
+test('reports carry the full work status and leaders see their team', async () => {
+  const p = await manager('POST', '/api/projects', { name: 'Status', member_ids: [people.leader.id] });
+  const pid = p.data.project.id;
+  const t1 = await leader('POST', `/api/projects/${pid}/tasks`, { title: 'Open one', assignee_id: people.employee.id });
+  await employee('POST', `/api/tasks/${t1.data.task.id}/status`, { status: 'blocked', note: 'Waiting for access' });
+
+  const preview = await employee('GET', `/api/reports/preview?project_id=${pid}`);
+  assert.equal(preview.data.snapshot.summary.blocked, 1);
+
+  const sent = await employee('POST', '/api/reports', { title: 'Daily', body: 'Status', project_id: pid });
+  const report = sent.data.report;
+  assert.equal(report.snapshot.tasks[0].status_note, 'Waiting for access');
+
+  // Leader's report includes a per-person summary of their team.
+  const up = await leader('POST', '/api/reports', { title: 'Team daily', body: 'All good' });
+  const leaderSnap = up.data.report.snapshot;
+  assert.ok(leaderSnap.team.some((m) => m.name === 'Employee' && m.blocked >= 1));
+
+  // The manager can read the employee's report (sent to the leader) through the team box, read-only.
+  const teamBox = await manager('GET', '/api/reports?box=team');
+  assert.ok(teamBox.data.reports.some((r) => r.id === report.id));
+  const view = await manager('GET', `/api/reports/${report.id}`);
+  assert.equal(view.status, 200);
+  assert.equal(view.data.permissions.reply, false);
+  assert.equal((await otherLeader('GET', `/api/reports/${report.id}`)).status, 404);
+
+  // Team task list, filtered to one person.
+  const one = await manager('GET', `/api/tasks?scope=team&assignee=${people.employee.id}&status=blocked`);
+  assert.ok(one.data.tasks.length >= 1);
+  assert.equal((await leader('GET', `/api/tasks?scope=team&assignee=${people.otherLeader.id}`)).status, 403);
+
+  // One-click team report.
+  const tr = await leader('GET', '/api/team-report');
+  assert.equal(tr.status, 200);
+  assert.ok(tr.data.members.some((m) => m.name === 'Employee' && m.stats.blocked >= 1));
+  assert.ok(tr.data.reports.some((r) => r.id === report.id));
+  assert.equal((await employee('GET', '/api/team-report')).status, 403);
 });

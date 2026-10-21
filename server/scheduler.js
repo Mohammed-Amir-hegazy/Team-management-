@@ -21,16 +21,16 @@ async function runReminders(db, at = new Date()) {
   return db.transaction(async (tx) => {
     let fired = 0;
     for (const task of await tx.all(DUE_REMINDERS, ts)) {
-      await notify(tx, task.assignee_id, 'reminder', `⏰ تذكير بالتاسك "${task.title}"`, `#/tasks/${task.id}`);
+      await notify(tx, task.assignee_id, 'reminder', `⏰ تذكير بالمهمة «${task.title}»`, `#/tasks/${task.id}`);
       await tx.run('UPDATE tasks SET reminder_sent = 1 WHERE id = ?', task.id);
       fired++;
     }
     for (const task of await tx.all(DUE_OVERDUE, ts)) {
       const assignee = await getUser(tx, task.assignee_id);
-      await notify(tx, task.assignee_id, 'overdue', `⚠️ عدّى الديدلاين بتاع التاسك "${task.title}"`, `#/tasks/${task.id}`);
+      await notify(tx, task.assignee_id, 'overdue', `⚠️ انقضى الموعد النهائي للمهمة «${task.title}»`, `#/tasks/${task.id}`);
       if (assignee && assignee.supervisor_id) {
         await notify(tx, assignee.supervisor_id, 'overdue',
-          `⚠️ التاسك "${task.title}" مع ${assignee.name} عدّت الديدلاين`, `#/tasks/${task.id}`);
+          `⚠️ انقضى الموعد النهائي للمهمة «${task.title}» المسندة إلى ${assignee.name}`, `#/tasks/${task.id}`);
       }
       await tx.run('UPDATE tasks SET overdue_notified = 1 WHERE id = ?', task.id);
       fired++;

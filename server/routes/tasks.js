@@ -23,7 +23,7 @@ function taskWithNames(db, taskId) {
 
 function checkReminder(deadline, reminderAt) {
   if (deadline && reminderAt && reminderAt > deadline) {
-    throw new HttpError(400, 'معاد التنبيه لازم يكون قبل الديدلاين');
+    throw new HttpError(400, 'يجب أن يكون موعد التنبيه قبل الموعد النهائي');
   }
 }
 
@@ -39,34 +39,42 @@ async function assignableMembers(db, user, projectId) {
 }
 
 module.exports = function register(router) {
-  // scope=mine: assigned to me. scope=team: assigned to anyone below me.
+  // scope=mine: assigned to me. scope=team: assigned to anyone below me (optionally one person).
   router.get('/api/tasks', async ({ db, user, query }) => {
-    const ids = query.get('scope') === 'team' ? [...(await subordinateIds(db, user.id))] : [user.id];
+    let ids = [user.id];
+    if (query.get('scope') === 'team') {
+      const team = await subordinateIds(db, user.id);
+      const only = v.optionalId(query.get('assignee'), 'الموظف');
+      if (only && !team.has(only)) throw new HttpError(403, 'يمكنك متابعة مهام أعضاء فريقك فقط');
+      ids = only ? [only] : [...team];
+    }
     if (ids.length === 0) return { tasks: [] };
-    const placeholders = ids.map(() => '?').join(',');
     const params = [...ids];
-    let sql = `${TASK_LIST_SQL} WHERE t.assignee_id IN (${placeholders})`;
+    let sql = `${TASK_LIST_SQL} WHERE t.assignee_id IN (${ids.map(() => '?').join(',')})`;
     const status = query.get('status');
-    if (status) {
+    if (status === 'overdue') {
+      sql += " AND t.status != 'done' AND t.deadline < ?";
+      params.push(now());
+    } else if (status) {
       sql += ' AND t.status = ?';
       params.push(v.oneOf(status, TASK_STATUSES, 'الحالة'));
     }
-    sql += " ORDER BY t.status = 'done', t.deadline IS NULL, t.deadline";
+    sql += " ORDER BY t.status = 'done', t.deadline IS NULL, t.deadline LIMIT 500";
     return { tasks: await db.all(sql, ...params) };
   });
 
   router.post('/api/projects/:id/tasks', async ({ db, user, params, body }) => {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
-    const title = v.text(body.title, 'عنوان التاسك', { max: 300 });
+    const title = v.text(body.title, 'عنوان المهمة', { max: 300 });
     const description = v.text(body.description, 'الوصف', { required: false, max: 10000 });
-    const assigneeId = v.id(body.assignee_id ?? user.id, 'المسؤول عن التاسك');
+    const assigneeId = v.id(body.assignee_id ?? user.id, 'المسؤول عن المهمة');
     const priority = v.oneOf(body.priority || 'medium', PRIORITIES, 'الأولوية');
-    const deadline = v.optionalDate(body.deadline, 'الديدلاين');
+    const deadline = v.optionalDate(body.deadline, 'الموعد النهائي');
     const reminderAt = v.optionalDate(body.reminder_at, 'التنبيه');
     checkReminder(deadline, reminderAt);
 
     if (!(await isSelfOrBelow(db, user, assigneeId))) {
-      throw new HttpError(403, 'تقدر تدي تاسكات لنفسك أو للناس اللي تحتك بس');
+      throw new HttpError(403, 'يمكنك إسناد المهام إلى نفسك أو إلى أعضاء فريقك فقط');
     }
     const assignee = await getUser(db, assigneeId);
     if (!assignee || !assignee.active) throw new HttpError(404, 'المستخدم غير موجود');
@@ -81,9 +89,9 @@ module.exports = function register(router) {
       `, project.id, title, description, assigneeId, user.id, priority, deadline, reminderAt, ts, ts);
       const taskId = r.lastInsertRowid;
       await tx.run('INSERT INTO task_status_history (task_id, user_id, from_status, to_status, note, created_at) VALUES (?, ?, NULL, ?, ?, ?)',
-        taskId, user.id, 'todo', 'تم إنشاء التاسك', ts);
+        taskId, user.id, 'todo', 'تم إنشاء المهمة', ts);
       if (assigneeId !== user.id) {
-        await notify(tx, assigneeId, 'task', `${user.name} أسند لك تاسك جديدة: "${title}"`, `#/tasks/${taskId}`);
+        await notify(tx, assigneeId, 'task', `أسند إليك ${user.name} مهمة جديدة: «${title}»`, `#/tasks/${taskId}`);
       }
       return taskId;
     });
@@ -91,7 +99,7 @@ module.exports = function register(router) {
   });
 
   router.get('/api/tasks/:id', async ({ db, user, params }) => {
-    const { task, project } = await loadTask(db, user, v.id(params.id, 'التاسك'));
+    const { task, project } = await loadTask(db, user, v.id(params.id, 'المهمة'));
     const creator = await getUser(db, task.created_by);
     const history = await db.all(`
       SELECT h.*, u.name AS user_name FROM task_status_history h JOIN users u ON u.id = h.user_id
@@ -127,22 +135,22 @@ module.exports = function register(router) {
   });
 
   router.patch('/api/tasks/:id', async ({ db, user, params, body }) => {
-    const { task } = await loadTask(db, user, v.id(params.id, 'التاسك'));
+    const { task } = await loadTask(db, user, v.id(params.id, 'المهمة'));
     const editable = await canEditTask(db, user, task);
     const isAssignee = task.assignee_id === user.id;
     const onlyReminder = Object.keys(body).every((k) => k === 'reminder_at');
-    if (!editable && !(isAssignee && onlyReminder)) throw new HttpError(403, 'غير مسموح');
+    if (!editable && !(isAssignee && onlyReminder)) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
 
     const next = { ...task };
-    if (body.title !== undefined) next.title = v.text(body.title, 'عنوان التاسك', { max: 300 });
+    if (body.title !== undefined) next.title = v.text(body.title, 'عنوان المهمة', { max: 300 });
     if (body.description !== undefined) next.description = v.text(body.description, 'الوصف', { required: false, max: 10000 });
     if (body.priority !== undefined) next.priority = v.oneOf(body.priority, PRIORITIES, 'الأولوية');
-    if (body.deadline !== undefined) next.deadline = v.optionalDate(body.deadline, 'الديدلاين');
+    if (body.deadline !== undefined) next.deadline = v.optionalDate(body.deadline, 'الموعد النهائي');
     if (body.reminder_at !== undefined) next.reminder_at = v.optionalDate(body.reminder_at, 'التنبيه');
     if (body.assignee_id !== undefined) {
-      next.assignee_id = v.id(body.assignee_id, 'المسؤول عن التاسك');
+      next.assignee_id = v.id(body.assignee_id, 'المسؤول عن المهمة');
       if (!(await isSelfOrBelow(db, user, next.assignee_id))) {
-        throw new HttpError(403, 'تقدر تدي تاسكات لنفسك أو للناس اللي تحتك بس');
+        throw new HttpError(403, 'يمكنك إسناد المهام إلى نفسك أو إلى أعضاء فريقك فقط');
       }
       const assignee = await getUser(db, next.assignee_id);
       if (!assignee || !assignee.active) throw new HttpError(404, 'المستخدم غير موجود');
@@ -157,7 +165,7 @@ module.exports = function register(router) {
       if (next.assignee_id !== task.assignee_id) {
         await addProjectMember(tx, task.project_id, next.assignee_id);
         if (next.assignee_id !== user.id) {
-          await notify(tx, next.assignee_id, 'task', `${user.name} أسند لك التاسك "${next.title}"`, `#/tasks/${task.id}`);
+          await notify(tx, next.assignee_id, 'task', `أسند إليك ${user.name} المهمة «${next.title}»`, `#/tasks/${task.id}`);
         }
       }
       await tx.run(`
@@ -172,8 +180,8 @@ module.exports = function register(router) {
 
   // Status + reason: so everyone knows where the task stands and why.
   router.post('/api/tasks/:id/status', async ({ db, user, params, body }) => {
-    const { task } = await loadTask(db, user, v.id(params.id, 'التاسك'));
-    if (!(await canUpdateTaskStatus(db, user, task))) throw new HttpError(403, 'غير مسموح');
+    const { task } = await loadTask(db, user, v.id(params.id, 'المهمة'));
+    if (!(await canUpdateTaskStatus(db, user, task))) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
     const status = v.oneOf(body.status, TASK_STATUSES, 'الحالة');
     const note = v.text(body.note, 'السبب / الملاحظة', { required: status === 'blocked', max: 2000 });
     if (status === task.status && note === task.status_note) return { task: await taskWithNames(db, task.id) };
@@ -189,18 +197,18 @@ module.exports = function register(router) {
       const watchers = new Set([task.created_by, task.assignee_id]);
       if (assignee.supervisor_id) watchers.add(assignee.supervisor_id);
       watchers.delete(user.id);
-      const reason = note ? ` — ${note}` : '';
+      const reason = note ? `: ${note}` : '';
       for (const uid of watchers) {
         await notify(tx, uid, status === 'blocked' ? 'blocked' : 'status',
-          `${user.name} غيّر حالة "${task.title}" إلى ${STATUS_LABELS[status]}${reason}`, `#/tasks/${task.id}`);
+          `غيّر ${user.name} حالة المهمة «${task.title}» إلى «${STATUS_LABELS[status]}»${reason}`, `#/tasks/${task.id}`);
       }
     });
     return { task: await taskWithNames(db, task.id) };
   });
 
   router.delete('/api/tasks/:id', async ({ db, user, params }) => {
-    const { task } = await loadTask(db, user, v.id(params.id, 'التاسك'));
-    if (!(await canEditTask(db, user, task))) throw new HttpError(403, 'غير مسموح');
+    const { task } = await loadTask(db, user, v.id(params.id, 'المهمة'));
+    if (!(await canEditTask(db, user, task))) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
     await db.transaction((tx) => purgeTasks(tx, 'SELECT ?', task.id));
     return { ok: true };
   });
@@ -208,9 +216,9 @@ module.exports = function register(router) {
   // ---- Requirements -------------------------------------------------------
 
   router.post('/api/tasks/:id/requirements', async ({ db, user, params, body }) => {
-    const { task } = await loadTask(db, user, v.id(params.id, 'التاسك'));
-    if (!user.supervisor_id) throw new HttpError(400, 'لا يوجد مسؤول أعلى منك لطلب المتطلبات منه');
-    const description = v.text(body.description, 'الطلب', { max: 1000 });
+    const { task } = await loadTask(db, user, v.id(params.id, 'المهمة'));
+    if (!user.supervisor_id) throw new HttpError(400, 'لا يوجد مسؤول مباشر أعلى منك لطلب المتطلبات منه');
+    const description = v.text(body.description, 'وصف المتطلب', { max: 1000 });
     const quantity = v.text(body.quantity, 'الكمية', { required: false, max: 100 });
     const r = await db.run('INSERT INTO requirements (task_id, requested_by, description, quantity, created_at) VALUES (?, ?, ?, ?, ?)',
       task.id, user.id, description, quantity, now());
@@ -218,16 +226,16 @@ module.exports = function register(router) {
   });
 
   router.delete('/api/requirements/:id', async ({ db, user, params }) => {
-    const req = await db.get('SELECT * FROM requirements WHERE id = ?', v.id(params.id, 'الطلب'));
+    const req = await db.get('SELECT * FROM requirements WHERE id = ?', v.id(params.id, 'المتطلب'));
     if (!req || req.requested_by !== user.id) throw new HttpError(404, 'الطلب غير موجود');
-    if (req.request_id) throw new HttpError(400, 'لا يمكن حذف طلب تم إرساله');
+    if (req.request_id) throw new HttpError(400, 'لا يمكن حذف متطلب تم إرساله');
     await db.run('DELETE FROM requirements WHERE id = ?', req.id);
     return { ok: true };
   });
 
   // One click: send every draft requirement this user has on the task.
   router.post('/api/tasks/:id/requirements/send', async ({ db, user, params, body }) => {
-    const { task, project } = await loadTask(db, user, v.id(params.id, 'التاسك'));
+    const { task, project } = await loadTask(db, user, v.id(params.id, 'المهمة'));
     const note = v.text(body.note, 'الملاحظة', { required: false, max: 2000 });
     return sendRequirements(db, user, { project, task, note });
   });

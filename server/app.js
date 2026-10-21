@@ -31,7 +31,7 @@ function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}
 
     try {
       const found = router.match(req.method, url.pathname);
-      if (!found) throw new HttpError(404, 'المسار غير موجود');
+      if (!found) throw new HttpError(404, 'المسار المطلوب غير موجود');
       const ctx = {
         req, res, db,
         params: found.params,
@@ -47,7 +47,7 @@ function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}
         ctx.body = await readJson(req);
       }
       ctx.user = await userFromSession(db, ctx.cookies.sid);
-      if (!found.route.options.public && !ctx.user) throw new HttpError(401, 'يجب تسجيل الدخول');
+      if (!found.route.options.public && !ctx.user) throw new HttpError(401, 'يُرجى تسجيل الدخول أولًا');
       const result = await found.route.handler(ctx);
       sendJson(res, 200, result ?? { ok: true });
     } catch (err) {
@@ -55,7 +55,7 @@ function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}
         sendJson(res, err.status, { error: err.message });
       } else {
         console.error(err);
-        sendJson(res, 500, { error: 'حدث خطأ غير متوقع' });
+        sendJson(res, 500, { error: 'حدث خطأ غير متوقع، يُرجى المحاولة مرة أخرى' });
       }
     }
   };

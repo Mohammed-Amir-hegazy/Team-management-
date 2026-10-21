@@ -3,7 +3,7 @@
 const { HttpError } = require('../http');
 const { now } = require('../db');
 const v = require('../validate');
-const { requireSupervisor, notify } = require('../access');
+const { requireSupervisor, subordinateIds, notify } = require('../access');
 
 // Items always hang off the original request of a forwarding chain: COALESCE(root_id, id).
 const REQUEST_SQL = `
@@ -16,9 +16,11 @@ const REQUEST_SQL = `
   LEFT JOIN tasks t ON t.id = q.task_id
 `;
 
+// Sender and recipient can act on a request; anyone above the sender may read it.
 async function loadRequest(db, user, requestId) {
   const request = await db.get(`${REQUEST_SQL} WHERE q.id = ?`, requestId);
-  if (!request || (request.sender_id !== user.id && request.recipient_id !== user.id)) {
+  const involved = request && (request.sender_id === user.id || request.recipient_id === user.id);
+  if (!request || (!involved && user.role !== 'owner' && !(await subordinateIds(db, user.id)).has(request.sender_id))) {
     throw new HttpError(404, 'الطلب غير موجود');
   }
   return request;
@@ -29,14 +31,22 @@ function rootOf(request) {
 }
 
 module.exports = function register(router) {
+  // box: inbox (sent to me), sent (by me), team (sent by anyone below me, read-only).
   router.get('/api/requests', async ({ db, user, query }) => {
-    const column = query.get('box') === 'sent' ? 'q.sender_id' : 'q.recipient_id';
-    const requests = await db.all(`${REQUEST_SQL} WHERE ${column} = ? ORDER BY q.status != 'pending', q.created_at DESC`, user.id);
-    return { requests };
+    const box = query.get('box');
+    const order = "ORDER BY q.status != 'pending', q.created_at DESC LIMIT 200";
+    if (box === 'team') {
+      const team = [...(await subordinateIds(db, user.id))];
+      if (!team.length) return { requests: [] };
+      const ph = team.map(() => '?').join(',');
+      return { requests: await db.all(`${REQUEST_SQL} WHERE q.sender_id IN (${ph}) AND q.root_id IS NULL ${order}`, ...team) };
+    }
+    const column = box === 'sent' ? 'q.sender_id' : 'q.recipient_id';
+    return { requests: await db.all(`${REQUEST_SQL} WHERE ${column} = ? ${order}`, user.id) };
   });
 
   router.get('/api/requests/:id', async ({ db, user, params }) => {
-    const request = await loadRequest(db, user, v.id(params.id, 'الطلب'));
+    const request = await loadRequest(db, user, v.id(params.id, 'المتطلب'));
     const items = await db.all(`
       SELECT r.*, t.title AS task_title, u.name AS requested_by_name
       FROM requirements r JOIN tasks t ON t.id = r.task_id JOIN users u ON u.id = r.requested_by
@@ -61,12 +71,12 @@ module.exports = function register(router) {
 
   // Approving/rejecting settles the whole chain, so the answer reaches the original sender.
   router.post('/api/requests/:id/respond', async ({ db, user, params, body }) => {
-    const request = await loadRequest(db, user, v.id(params.id, 'الطلب'));
-    if (request.recipient_id !== user.id) throw new HttpError(403, 'غير مسموح');
-    if (request.status !== 'pending') throw new HttpError(400, 'تم الرد على هذا الطلب بالفعل');
+    const request = await loadRequest(db, user, v.id(params.id, 'المتطلب'));
+    if (request.recipient_id !== user.id) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
+    if (request.status !== 'pending') throw new HttpError(400, 'تم الرد على هذا الطلب مسبقًا');
     const decision = v.oneOf(body.decision, ['approved', 'rejected'], 'القرار');
     const note = v.text(body.note, 'الرد', { required: decision === 'rejected', max: 2000 });
-    const label = decision === 'approved' ? 'وافق على' : 'رفض';
+    const label = decision === 'approved' ? 'بالموافقة على' : 'برفض';
 
     await db.transaction(async (tx) => {
       const chain = await tx.all('SELECT id, sender_id FROM requests WHERE COALESCE(root_id, id) = ?', rootOf(request));
@@ -74,7 +84,7 @@ module.exports = function register(router) {
         decision, note, now(), rootOf(request));
       for (const link of chain) {
         await notify(tx, link.sender_id, 'request_response',
-          `${user.name} ${label} طلبك${note ? ` — ${note}` : ''}`, `#/requests/${link.id}`);
+          `قام ${user.name} ${label} طلبك${note ? `: ${note}` : ''}`, `#/requests/${link.id}`);
       }
     });
     return { ok: true };
@@ -82,9 +92,9 @@ module.exports = function register(router) {
 
   // Passing it one step up the chain (never skipping a level).
   router.post('/api/requests/:id/forward', async ({ db, user, params, body }) => {
-    const request = await loadRequest(db, user, v.id(params.id, 'الطلب'));
-    if (request.recipient_id !== user.id) throw new HttpError(403, 'غير مسموح');
-    if (request.status !== 'pending') throw new HttpError(400, 'تم الرد على هذا الطلب بالفعل');
+    const request = await loadRequest(db, user, v.id(params.id, 'المتطلب'));
+    if (request.recipient_id !== user.id) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
+    if (request.status !== 'pending') throw new HttpError(400, 'تم الرد على هذا الطلب مسبقًا');
     const supervisor = await requireSupervisor(db, user);
     const note = v.text(body.note, 'الملاحظة', { required: false, max: 2000 });
 
@@ -94,8 +104,8 @@ module.exports = function register(router) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, user.id, supervisor.id, request.scope, request.project_id, request.task_id, note, request.id, rootOf(request), now());
       await tx.run("UPDATE requests SET status = 'forwarded' WHERE id = ?", request.id);
-      await notify(tx, supervisor.id, 'request', `${user.name} حوّل لك طلب من ${request.sender_name}`, `#/requests/${r.lastInsertRowid}`);
-      await notify(tx, request.sender_id, 'request_response', `${user.name} حوّل طلبك لـ ${supervisor.name}`, `#/requests/${request.id}`);
+      await notify(tx, supervisor.id, 'request', `أحال إليك ${user.name} طلبًا مقدَّمًا من ${request.sender_name}`, `#/requests/${r.lastInsertRowid}`);
+      await notify(tx, request.sender_id, 'request_response', `أحال ${user.name} طلبك إلى ${supervisor.name}`, `#/requests/${request.id}`);
       return r.lastInsertRowid;
     });
     return { request_id: id };

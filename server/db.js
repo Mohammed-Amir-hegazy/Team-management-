@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'team_leader', 'employee')),
   supervisor_id INTEGER REFERENCES users(id),
+  job_title     TEXT NOT NULL DEFAULT '',
+  roles         TEXT NOT NULL DEFAULT '',
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL
 );
@@ -104,6 +106,8 @@ CREATE TABLE IF NOT EXISTS reports (
   project_id        INTEGER REFERENCES projects(id) ON DELETE SET NULL,
   task_id           INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
   forwarded_from_id INTEGER REFERENCES reports(id) ON DELETE SET NULL,
+  -- JSON snapshot of the sender's work status (tasks, statuses, team summary) at sending time.
+  snapshot          TEXT,
   reply             TEXT,
   replied_at        TEXT,
   read_at           TEXT,
@@ -184,7 +188,26 @@ async function openDatabase(url, authToken) {
   const client = createClient({ url, authToken });
   if (url.startsWith('file:')) await client.execute('PRAGMA journal_mode = WAL');
   await client.executeMultiple(SCHEMA);
-  return new Database(client);
+  const db = new Database(client);
+  await migrate(db);
+  return db;
+}
+
+// Columns added after the first release; CREATE TABLE IF NOT EXISTS won't add them to old databases.
+const ADDED_COLUMNS = [
+  ['users', 'job_title', "TEXT NOT NULL DEFAULT ''"],
+  ['users', 'roles', "TEXT NOT NULL DEFAULT ''"],
+  ['reports', 'snapshot', 'TEXT'],
+];
+
+async function migrate(db) {
+  for (const [table, column, type] of ADDED_COLUMNS) {
+    const columns = await db.all(`PRAGMA table_info(${table})`);
+    if (!columns.some((c) => c.name === column)) {
+      await db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  }
+  await db.run("UPDATE users SET roles = role WHERE roles = ''");
 }
 
 function now() {

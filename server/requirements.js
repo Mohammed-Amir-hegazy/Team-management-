@@ -15,7 +15,7 @@ async function sendRequirements(db, user, { project, task = null, note = '' }) {
 
   return db.transaction(async (tx) => {
     const drafts = await tx.all(...draftsSql);
-    if (drafts.length === 0) throw new HttpError(400, 'لا توجد طلبات جديدة لإرسالها');
+    if (drafts.length === 0) throw new HttpError(400, 'لا توجد متطلبات جديدة لإرسالها');
     const result = await tx.run(`
       INSERT INTO requests (sender_id, recipient_id, scope, project_id, task_id, note, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -23,8 +23,8 @@ async function sendRequirements(db, user, { project, task = null, note = '' }) {
     const id = result.lastInsertRowid;
     const ph = drafts.map(() => '?').join(',');
     await tx.run(`UPDATE requirements SET request_id = ? WHERE id IN (${ph})`, id, ...drafts.map((d) => d.id));
-    const what = task ? `التاسك "${task.title}"` : `مشروع "${project.name}"`;
-    await notify(tx, supervisor.id, 'request', `${user.name} أرسل ${drafts.length} طلب/طلبات لـ ${what}`, `#/requests/${id}`);
+    const what = task ? `المهمة «${task.title}»` : `مشروع «${project.name}»`;
+    await notify(tx, supervisor.id, 'request', `أرسل ${user.name} ${drafts.length} من المتطلبات الخاصة بـ${what}`, `#/requests/${id}`);
     return { request_id: id, count: drafts.length };
   });
 }
