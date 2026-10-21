@@ -2,6 +2,8 @@
 
 // Optional integrations, all configured through environment variables.
 
+const { storageWarning } = require('./storage');
+
 function cloudinaryFromEnv(env) {
   // Either CLOUDINARY_URL=cloudinary://<key>:<secret>@<cloud> or the three separate variables.
   if (env.CLOUDINARY_URL) {
@@ -29,8 +31,8 @@ function loadConfig(env = process.env) {
     // The one account that owns the platform, and where its login codes go (WhatsApp/SMS and email).
     platformOwnerEmail: (env.PLATFORM_OWNER_EMAIL || 'mohammedamirwork@gmail.com').trim().toLowerCase(),
     platformOwnerPhone: (env.PLATFORM_OWNER_PHONE || '201018736900').replace(/\D/g, ''),
-    // On Render without Turso the database is a file on a disk that is wiped by every deploy.
-    ephemeralStorage: !env.TURSO_DATABASE_URL && !!env.RENDER,
+    // Data that would be lost on the next deploy (see storage.js): 'ephemeral', 'branch' or null.
+    storageWarning: storageWarning(env),
   };
 }
 

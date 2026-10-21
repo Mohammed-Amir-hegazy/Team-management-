@@ -21,7 +21,7 @@ function createApp(db, {
   // Which optional integrations are switched on, so the interface only offers what works.
   router.get('/api/client-config', () => ({
     otp: messenger.channels, uploads: true, signup: !!config.allowSignup, trial_days: config.trialDays,
-    storage_warning: !!config.ephemeralStorage,
+    storage_warning: config.storageWarning || null,
   }), { public: true });
   require('./routes/users')(router);
   require('./routes/projects')(router);

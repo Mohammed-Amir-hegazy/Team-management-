@@ -62,9 +62,11 @@ export async function viewPlatform({ query }) {
       <div class="titles"><h1>لوحة إدارة المنصة</h1><div class="sub">الشركات المشتركة في منصة ابتكار واشتراكاتها وحساباتها</div></div>
       <div class="actions"><button class="btn" id="new-company">${icon('plus')}شركة جديدة</button></div>
     </div>
-    ${state.config.storage_warning ? `<div class="callout red">${icon('alert')}<div><b>تحذير: البيانات غير محفوظة بشكل دائم.</b>
-      قاعدة البيانات مخزّنة حاليًا على قرص الخادم المؤقت، ويُمحى محتواها مع كل تحديث أو إعادة تشغيل.
-      لحفظ البيانات بشكل دائم أضف المتغيرين <bdi dir="ltr">TURSO_DATABASE_URL</bdi> و<bdi dir="ltr">TURSO_AUTH_TOKEN</bdi> في إعدادات الخادم على Render.</div></div>` : ''}
+    ${state.config.storage_warning ? `<div class="callout red">${icon('alert')}<div><b>تحذير: البيانات ستُفقد مع التحديث القادم.</b>
+      ${state.config.storage_warning === 'branch'
+    ? 'المنصة متصلة بنسخة مؤقتة من قاعدة البيانات أنشأها ربط Turso مع Vercel لهذا النشر فقط، وكل نشر جديد يبدأ بنسخة فارغة.'
+    : 'قاعدة البيانات مخزّنة حاليًا على قرص الخادم المؤقت، ويُمحى محتواها مع كل تحديث أو إعادة تشغيل.'}
+      لحفظ البيانات بشكل دائم أضف المتغيرين <bdi dir="ltr">EBTIKAR_DB_URL</bdi> و<bdi dir="ltr">EBTIKAR_DB_TOKEN</bdi> لقاعدة بيانات ثابتة في إعدادات الخادم.</div></div>` : ''}
     <section class="kpis">
       ${kpi(totals.companies, 'إجمالي الشركات', 'layers', 'navy')}
       ${kpi(totals.annual, 'اشتراكات سنوية فعّالة', 'shield')}

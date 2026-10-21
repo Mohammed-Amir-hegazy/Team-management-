@@ -325,4 +325,4 @@ function now() {
   return new Date().toISOString();
 }
 
-module.exports = { openDatabase, now };
+module.exports = { openDatabase, migrate, now };
