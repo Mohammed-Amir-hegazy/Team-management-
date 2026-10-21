@@ -111,12 +111,14 @@ const VISIBLE_PROJECTS_SQL = `
 
 function visibleProjects(db, user) {
   if (user.role === 'owner') {
-    return db.all('SELECT * FROM projects ORDER BY created_at DESC');
+    return db.all('SELECT * FROM projects WHERE company_id = ? ORDER BY created_at DESC', user.company_id);
   }
   return db.all(`${VISIBLE_PROJECTS_SQL} ORDER BY p.created_at DESC`, user.id, user.id);
 }
 
+// Projects never cross company boundaries; within a company the owner sees everything.
 async function canSeeProject(db, user, project) {
+  if (!project || project.company_id !== user.company_id) return false;
   if (user.role === 'owner') return true;
   return !!(await db.get(`${VISIBLE_PROJECTS_SQL} AND p.id = ?`, user.id, user.id, project.id));
 }
@@ -132,9 +134,9 @@ async function personalProject(db, owner) {
   const existing = await db.get('SELECT * FROM projects WHERE personal_owner_id = ?', owner.id);
   if (existing) return existing;
   await db.run(`
-    INSERT OR IGNORE INTO projects (name, description, created_by, personal_owner_id, created_at)
-    VALUES (?, '', ?, ?, ?)
-  `, `مهام مستقلة — ${owner.name}`, owner.id, owner.id, now());
+    INSERT OR IGNORE INTO projects (name, description, created_by, personal_owner_id, company_id, created_at)
+    VALUES (?, '', ?, ?, ?, ?)
+  `, `مهام مستقلة — ${owner.name}`, owner.id, owner.id, owner.company_id, now());
   const project = await db.get('SELECT * FROM projects WHERE personal_owner_id = ?', owner.id);
   await addProjectMember(db, project.id, owner.id);
   return project;
@@ -225,6 +227,8 @@ function publicUser(user) {
     roles,
     role_labels: roles.map((r) => ROLE_LABELS[r]),
     is_admin: isAdmin(user),
+    is_platform: !!user.is_platform,
+    company_id: user.company_id,
     supervisor_id: user.supervisor_id,
     active: !!user.active,
     created_at: user.created_at,

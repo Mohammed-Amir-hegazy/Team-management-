@@ -33,6 +33,21 @@ function codeEmail({ name, code, minutes }) {
   return { subject: 'رمز التحقق — منصة ابتكار', html, text };
 }
 
+function noticeEmail({ name, subject, text }) {
+  const html = `<!doctype html><html lang="ar" dir="rtl"><body style="margin:0;background:#F4F4FB;font-family:Tahoma,Arial,sans-serif">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px"><tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fff;border-radius:16px;overflow:hidden">
+      <tr><td style="background:#06044B;padding:22px 28px;text-align:left;direction:ltr">
+        <span style="color:#fff;font-size:24px;font-weight:bold;letter-spacing:1px">EBTIKAR</span>
+        <span style="display:block;color:#62E98A;font-size:12px">software solutions</span></td></tr>
+      <tr><td style="padding:28px;color:#0B0A3A;text-align:right">
+        <p style="margin:0 0 12px;font-size:16px">${esc(name)}، تحية طيبة،</p>
+        <p style="margin:0;font-size:15px;line-height:1.9">${esc(text)}</p></td></tr>
+      <tr><td style="background:#F7F7FD;padding:14px 28px;font-size:12px;color:#6E6C93;text-align:center">منصة ابتكار لإدارة الأعمال — Ebtikar Software Solutions</td></tr>
+    </table></td></tr></table></body></html>`;
+  return { subject, html, text: `${name}، تحية طيبة،\n${text}` };
+}
+
 function createMessenger(env = process.env, fetchImpl = globalThis.fetch) {
   const from = env.MAIL_FROM;
   const fromName = env.MAIL_FROM_NAME || 'منصة ابتكار';
@@ -90,6 +105,12 @@ function createMessenger(env = process.env, fetchImpl = globalThis.fetch) {
 
   return {
     channels,
+    // A plain notice by email (e.g. subscription renewal); silently skipped when no provider is set.
+    async sendNotice({ email: address, name, subject, text }) {
+      if (!email) return false;
+      await sendEmail({ to: address, name, ...noticeEmail({ name, subject, text }) });
+      return true;
+    },
     async sendCode(channel, { email: address, phone, name, code, minutes }) {
       if (!channels[channel]) throw new HttpError(400, 'طريقة الإرسال المختارة غير مفعّلة');
       if (channel === 'email' && devLog) { console.log(`[OTP_DEV_LOG] ${address}: ${code}`); return undefined; }

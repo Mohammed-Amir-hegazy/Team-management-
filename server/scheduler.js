@@ -3,6 +3,7 @@
 // Fires task alarms: the reminder the user set, and an overdue alert once the deadline passes.
 
 const { getUser, notify } = require('./access');
+const { runSubscriptionReminders } = require('./subscription');
 
 const DUE_REMINDERS = `
   SELECT * FROM tasks
@@ -39,14 +40,20 @@ async function runReminders(db, at = new Date()) {
   });
 }
 
-function startScheduler(db, intervalMs = 30000) {
+function startScheduler(db, { intervalMs = 30000, messenger = null } = {}) {
   let running = false;
+  let lastSubscriptionCheck = 0;
   const tick = async () => {
     if (running) return;
     running = true;
     try {
       await runReminders(db);
       await db.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
+      // Renewal reminders are day-based, so an hourly look is plenty.
+      if (Date.now() - lastSubscriptionCheck > 3600 * 1000) {
+        lastSubscriptionCheck = Date.now();
+        await runSubscriptionReminders(db, new Date(), messenger);
+      }
     } catch (err) {
       console.error('scheduler error:', err);
     } finally {

@@ -47,8 +47,8 @@ module.exports = function register(router) {
       if (mid !== user.id && !subs.has(mid)) throw new HttpError(403, 'يمكنك إضافة أعضاء فريقك فقط');
     }
     const id = await db.transaction(async (tx) => {
-      const r = await tx.run('INSERT INTO projects (name, description, created_by, created_at) VALUES (?, ?, ?, ?)',
-        name, description, user.id, now());
+      const r = await tx.run('INSERT INTO projects (name, description, created_by, company_id, created_at) VALUES (?, ?, ?, ?, ?)',
+        name, description, user.id, user.company_id, now());
       const projectId = r.lastInsertRowid;
       await addProjectMember(tx, projectId, user.id);
       for (const mid of memberIds) {

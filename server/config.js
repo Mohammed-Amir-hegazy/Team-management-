@@ -20,6 +20,12 @@ function loadConfig(env = process.env) {
     // Used to turn local numbers such as 01012345678 into international 201012345678.
     defaultCountryCode: (env.DEFAULT_COUNTRY_CODE || '20').replace(/\D/g, ''),
     appName: 'ابتكار',
+    // Self-service company signup with a free trial (ALLOW_SIGNUP=0 turns it off).
+    allowSignup: env.ALLOW_SIGNUP !== '0',
+    trialDays: Number(env.TRIAL_DAYS) || 30,
+    trialSeats: Number(env.TRIAL_SEATS) || 10,
+    // Where companies are directed to renew (the platform owner's WhatsApp / email).
+    platformContact: { phone: (env.PLATFORM_CONTACT_PHONE || '').replace(/\D/g, ''), email: env.PLATFORM_CONTACT_EMAIL || '' },
   };
 }
 

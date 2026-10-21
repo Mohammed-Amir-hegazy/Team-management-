@@ -8,6 +8,9 @@ const {
   ROLES, roleRank, userRoles, isAdmin, primaryRole, getUser, subordinateIds, ancestorIds, publicUser, notify,
 } = require('../access');
 const { normalizePhone } = require('../phone');
+const {
+  accessOf, activeSeats, assertSeatAvailable, createCompany, platformAdmins, PLAN_LABELS,
+} = require('../subscription');
 
 const NOT_ALLOWED = 'ليست لديك صلاحية لتنفيذ هذا الإجراء';
 
@@ -44,9 +47,11 @@ async function emailTaken(db, email, exceptId = 0) {
 }
 
 // A supervisor must sit at a higher level, and nobody may end up supervising themselves.
-async function checkPlacement(db, { userId = null, level, supervisorId }) {
+async function checkPlacement(db, { userId = null, level, supervisorId, companyId }) {
   const supervisor = await getUser(db, supervisorId);
-  if (!supervisor || !supervisor.active) throw new HttpError(400, 'المسؤول المباشر المحدد غير موجود');
+  if (!supervisor || !supervisor.active || supervisor.company_id !== companyId) {
+    throw new HttpError(400, 'المسؤول المباشر المحدد غير موجود');
+  }
   if (roleRank(supervisor.role) >= roleRank(level)) {
     throw new HttpError(400, 'يجب أن يكون المسؤول المباشر في مستوى وظيفي أعلى');
   }
@@ -75,20 +80,48 @@ module.exports = function register(router) {
     return { needsSetup: n === 0 };
   }, { public: true });
 
-  // First run only: creates the company owner, who is also the first system admin.
+  // First run only: creates the platform's own company (perpetual licence) and its owner,
+  // who also becomes the platform owner able to manage every company.
   router.post('/api/setup', async ({ db, body, res, config }) => {
     const name = v.text(body.name, 'الاسم', { max: 120 });
     const email = validateEmail(body.email);
     const password = validatePassword(body.password);
     const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+    const companyName = v.text(body.company_name, 'اسم الشركة', { required: false, max: 160 }) || 'ابتكار';
     const phone = await readPhone(db, body.phone, config);
     const user = await db.transaction(async (tx) => {
       const { n } = await tx.get('SELECT EXISTS (SELECT 1 FROM users) AS n');
       if (n > 0) throw new HttpError(409, 'تم إعداد النظام مسبقًا');
+      const companyId = await createCompany(tx, { name: companyName, plan: 'owned' });
       const r = await tx.run(`
-        INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, supervisor_id, created_at)
-        VALUES (?, ?, ?, 'owner', 'owner', ?, ?, NULL, ?)
-      `, name, email, auth.hashPassword(password), jobTitle, phone, now());
+        INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, is_platform, supervisor_id, created_at)
+        VALUES (?, ?, ?, 'owner', 'owner', ?, ?, ?, 1, NULL, ?)
+      `, name, email, auth.hashPassword(password), jobTitle, phone, companyId, now());
+      return getUser(tx, r.lastInsertRowid);
+    });
+    res.setHeader('Set-Cookie', auth.sessionCookie(await auth.createSession(db, user.id)));
+    return { user: await withSupervisorName(db, user) };
+  }, { public: true });
+
+  // A new company registers itself and starts a free trial.
+  router.post('/api/signup', async ({ db, body, res, config }) => {
+    if (!config.allowSignup) throw new HttpError(403, 'التسجيل الذاتي غير متاح حاليًا؛ يُرجى التواصل مع إدارة منصة ابتكار');
+    const companyName = v.text(body.company_name, 'اسم الشركة', { max: 160 });
+    const name = v.text(body.name, 'الاسم', { max: 120 });
+    const email = validateEmail(body.email);
+    const password = validatePassword(body.password);
+    const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+    const phone = await readPhone(db, body.phone, config);
+    if (await emailTaken(db, email)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
+    const user = await db.transaction(async (tx) => {
+      const companyId = await createCompany(tx, { name: companyName, plan: 'trial', seats: config.trialSeats, days: config.trialDays });
+      const r = await tx.run(`
+        INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, supervisor_id, created_at)
+        VALUES (?, ?, ?, 'owner', 'owner', ?, ?, ?, NULL, ?)
+      `, name, email, auth.hashPassword(password), jobTitle, phone, companyId, now());
+      for (const p of await platformAdmins(tx)) {
+        await notify(tx, p.id, 'platform', `سجّلت شركة جديدة «${companyName}» وبدأت الفترة التجريبية`, `#/platform/companies/${companyId}`);
+      }
       return getUser(tx, r.lastInsertRowid);
     });
     res.setHeader('Set-Cookie', auth.sessionCookie(await auth.createSession(db, user.id)));
@@ -103,6 +136,7 @@ module.exports = function register(router) {
       throw new HttpError(401, 'البريد الإلكتروني أو كلمة المرور غير صحيحة');
     }
     if (!user.active) throw new HttpError(403, 'هذا الحساب موقوف، يُرجى التواصل مع مسؤول النظام');
+    await db.run('UPDATE users SET last_login_at = ? WHERE id = ?', now(), user.id);
     res.setHeader('Set-Cookie', auth.sessionCookie(await auth.createSession(db, user.id)));
     return { user: await withSupervisorName(db, user) };
   }, { public: true });
@@ -123,20 +157,29 @@ module.exports = function register(router) {
       chain.push({ id: u.id, name: u.name, job_title: u.job_title, role: u.role, phone: u.phone });
     }
     out.chain = chain;
+    out.company = {
+      id: user.company_id,
+      name: user.company_name,
+      plan: user.company_plan,
+      plan_label: PLAN_LABELS[user.company_plan],
+      ends_at: user.company_ends_at,
+      seats: user.company_seats,
+      ...accessOf(user),
+    };
     return { user: out };
-  });
+  }, { ungated: true });
 
   // Everyone keeps their own WhatsApp number up to date.
   router.patch('/api/me', async ({ db, user, body, config }) => {
     const phone = await readPhone(db, body.phone, config, user.id);
     await db.run('UPDATE users SET phone = ? WHERE id = ?', phone, user.id);
     return { user: await withSupervisorName(db, await getUser(db, user.id)) };
-  });
+  }, { ungated: true });
 
   // An in-app reminder (it rings like an alarm) to someone in my chain or my team.
   router.post('/api/users/:id/remind', async ({ db, user, params, body }) => {
     const target = await getUser(db, v.id(params.id, 'المستخدم'));
-    if (!target || !target.active) throw new HttpError(404, 'المستخدم غير موجود');
+    if (!target || !target.active || target.company_id !== user.company_id) throw new HttpError(404, 'المستخدم غير موجود');
     const related = (await subordinateIds(db, user.id)).has(target.id) || (await ancestorIds(db, user.id)).includes(target.id);
     if (!related || target.id === user.id) throw new HttpError(403, 'يمكنك تذكير مسؤوليك أو أعضاء فريقك فقط');
     const message = v.text(body.message, 'نص التذكير', { max: 1000 });
@@ -154,13 +197,13 @@ module.exports = function register(router) {
     const password = validatePassword(body.new_password);
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', auth.hashPassword(password), user.id);
     return { ok: true };
-  });
+  }, { ungated: true });
 
   // Admins see everyone; others see their supervisor chain, themselves and everyone below them.
   router.get('/api/users', async ({ db, user }) => {
     const admin = isAdmin(user);
     const subs = await subordinateIds(db, user.id);
-    const all = await db.all('SELECT * FROM users');
+    const all = await db.all('SELECT * FROM users WHERE company_id = ?', user.company_id);
     let visible = all;
     if (!admin && user.role !== 'owner') {
       const ids = new Set([user.id, ...(await ancestorIds(db, user.id)), ...subs]);
@@ -174,7 +217,7 @@ module.exports = function register(router) {
       manageable: admin && (u.role !== 'owner' || u.id === user.id),
     }));
     users.sort((a, b) => roleRank(a.role) - roleRank(b.role) || a.name.localeCompare(b.name, 'ar'));
-    return { users, can_manage_accounts: admin };
+    return { users, can_manage_accounts: admin, seats: { used: await activeSeats(db, user.company_id), total: user.company_seats } };
   });
 
   // Only the owner and system admins create accounts.
@@ -187,21 +230,22 @@ module.exports = function register(router) {
     const roles = validateRoles(body.roles);
     const level = primaryRole(roles);
     const supervisorId = v.id(body.supervisor_id, 'المسؤول المباشر');
-    await checkPlacement(db, { level, supervisorId });
+    await checkPlacement(db, { level, supervisorId, companyId: user.company_id });
     if (await emailTaken(db, email)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
     const phone = await readPhone(db, body.phone, config);
+    await assertSeatAvailable(db, user.company_id);
 
     const r = await db.run(`
-      INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, supervisor_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, phone, supervisorId, now());
+      INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, supervisor_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, phone, user.company_id, supervisorId, now());
     return { user: await withSupervisorName(db, await getUser(db, r.lastInsertRowid)) };
   });
 
   router.patch('/api/users/:id', async ({ db, user, params, body, config }) => {
     if (!isAdmin(user)) throw new HttpError(403, 'إدارة الحسابات متاحة لصاحب الشركة ومسؤول النظام فقط');
     const target = await getUser(db, v.id(params.id, 'المستخدم'));
-    if (!target) throw new HttpError(404, 'المستخدم غير موجود');
+    if (!target || target.company_id !== user.company_id) throw new HttpError(404, 'المستخدم غير موجود');
     const isOwner = target.role === 'owner';
     if (isOwner && target.id !== user.id) throw new HttpError(403, 'لا يمكن تعديل حساب صاحب الشركة إلا من قِبله');
 
@@ -222,7 +266,7 @@ module.exports = function register(router) {
       next.roles = roles.join(',');
       next.role = primaryRole(roles);
       next.supervisor_id = body.supervisor_id !== undefined ? v.id(body.supervisor_id, 'المسؤول المباشر') : target.supervisor_id;
-      await checkPlacement(db, { userId: target.id, level: next.role, supervisorId: next.supervisor_id });
+      await checkPlacement(db, { userId: target.id, level: next.role, supervisorId: next.supervisor_id, companyId: user.company_id });
     }
 
     if (body.active !== undefined && !isOwner) {
@@ -231,6 +275,8 @@ module.exports = function register(router) {
         if (target.id === user.id) throw new HttpError(400, 'لا يمكنك إيقاف حسابك');
         const { n } = await db.get('SELECT COUNT(*) AS n FROM users WHERE supervisor_id = ? AND active = 1', target.id);
         if (n > 0) throw new HttpError(400, 'لهذا المستخدم مرؤوسون نشطون؛ يُرجى نقلهم إلى مسؤول آخر أولًا');
+      } else if (!target.active) {
+        await assertSeatAvailable(db, user.company_id);
       }
     }
 

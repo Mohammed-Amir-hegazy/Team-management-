@@ -20,18 +20,18 @@ module.exports = function register(router) {
         (SELECT COUNT(*) FROM requests WHERE recipient_id = ? AND status = 'pending') AS pending_requests
     `, user.id, user.id, user.id);
     return { notifications, ...counts };
-  });
+  }, { ungated: true });
 
   router.post('/api/notifications/read-all', async ({ db, user }) => {
     await db.run('UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL', now(), user.id);
     return { ok: true };
-  });
+  }, { ungated: true });
 
   router.post('/api/notifications/:id/read', async ({ db, user, params }) => {
     await db.run('UPDATE notifications SET read_at = ? WHERE id = ? AND user_id = ? AND read_at IS NULL',
       now(), v.id(params.id, 'الإشعار'), user.id);
     return { ok: true };
-  });
+  }, { ungated: true });
 
   router.get('/api/dashboard', async ({ db, user }) => {
     const ts = now();

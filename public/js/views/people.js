@@ -38,7 +38,7 @@ function personCard(u, admin) {
 }
 
 export async function viewPeople() {
-  const { users, can_manage_accounts: admin } = await api('GET', '/api/users');
+  const { users, can_manage_accounts: admin, seats } = await api('GET', '/api/users');
   setTitle(admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي');
   const byId = new Map(users.map((u) => [u.id, u]));
   const children = new Map();
@@ -58,7 +58,7 @@ export async function viewPeople() {
   const el = render(`
     <div class="page-head">
       <div class="titles"><h1>${admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي'}</h1>
-        <div class="sub">${active} حساب نشط · تُرسل التقارير والطلبات إلى المسؤول المباشر فقط</div></div>
+        <div class="sub">${admin && seats.total ? `${seats.used} من ${seats.total} حسابات مستخدمة في باقتكم` : `${active} حساب نشط`} · تُرسل التقارير والطلبات إلى المسؤول المباشر فقط</div></div>
       <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة موظف</button>` : ''}</div>
     </div>
     ${!admin ? `<div class="callout blue">${icon('shield')}<div>إنشاء الحسابات وتعديل الأدوار من صلاحيات صاحب الشركة ومسؤول النظام.</div></div>` : ''}

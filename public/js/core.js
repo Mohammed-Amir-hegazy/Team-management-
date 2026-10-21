@@ -112,6 +112,9 @@ export function plural(n, forms) {
 }
 export const TASKS_N = { zero: 'لا توجد مهام', one: 'مهمة واحدة', two: 'مهمتان', few: '# مهام', many: '# مهمة', other: '# مهمة' };
 export const ITEMS_N = { zero: 'لا توجد متطلبات', one: 'متطلب واحد', two: 'متطلبان', few: '# متطلبات', many: '# متطلبًا', other: '# متطلب' };
+export const DAYS_N = { zero: '0 يوم', one: 'يوم واحد', two: 'يومان', few: '# أيام', many: '# يومًا', other: '# يوم' };
+export const PLAN_LABELS = { trial: 'فترة تجريبية', annual: 'اشتراك سنوي', owned: 'ملكية دائمة' };
+export const PLAN_COLORS = { trial: 'amber', annual: 'blue', owned: 'green' };
 export const MEMBERS_N = { zero: 'لا يوجد أعضاء', one: 'عضو واحد', two: 'عضوان', few: '# أعضاء', many: '# عضوًا', other: '# عضو' };
 
 export function deadlineInfo(iso, status) {
@@ -152,6 +155,7 @@ export async function api(method, path, body) {
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && state.me) window.dispatchEvent(new Event('session-expired'));
+  if (res.status === 402 && state.me) window.dispatchEvent(new CustomEvent('subscription-locked', { detail: data.reason }));
   if (!res.ok) throw new Error(data.error || 'حدث خطأ غير متوقع');
   return data;
 }
@@ -365,6 +369,7 @@ export function render(html) {
   el.innerHTML = html;
   bindLinks(el);
   animateIn(el);
+  tickCountdowns(el);
   return el;
 }
 
@@ -402,4 +407,56 @@ export function setFab(label, fn) {
     fab.innerHTML = icon('plus');
     fab.setAttribute('aria-label', label);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Live countdowns: any element with data-ends updates every second.
+// ---------------------------------------------------------------------------
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+export function urgency(endsAt) {
+  if (!endsAt) return 'green';
+  const days = (new Date(endsAt) - Date.now()) / 86400000;
+  if (days <= 0) return 'red';
+  if (days <= 7) return 'red';
+  if (days <= 30) return 'amber';
+  return 'green';
+}
+
+export function countdown(endsAt, { big = false } = {}) {
+  if (!endsAt) return `<span class="countdown done ${big ? 'big' : ''}">${big ? '<b>∞</b><small>ملكية دائمة دون انتهاء</small>' : 'دون انتهاء'}</span>`;
+  return `<span class="countdown ${big ? 'big' : ''} u-${urgency(endsAt)}" data-ends="${esc(endsAt)}" data-big="${big ? 1 : ''}"></span>`;
+}
+
+function renderCountdown(el) {
+  const ms = new Date(el.dataset.ends) - Date.now();
+  const big = !!el.dataset.big;
+  if (ms <= 0) {
+    el.innerHTML = big ? '<b>انتهى</b><small>انقضت مدة الاشتراك</small>' : 'منتهٍ';
+    el.className = `countdown u-red${big ? ' big done expired' : ''}`;
+    return;
+  }
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  el.innerHTML = big
+    ? `<span class="cd"><b>${d}</b><small>يوم</small></span><span class="cd"><b>${pad2(h)}</b><small>ساعة</small></span>
+       <span class="cd"><b>${pad2(m)}</b><small>دقيقة</small></span><span class="cd"><b>${pad2(sec)}</b><small>ثانية</small></span>`
+    : `${plural(d, DAYS_N)} <span dir="ltr">${pad2(h)}:${pad2(m)}:${pad2(sec)}</span>`;
+}
+
+export function tickCountdowns(root = document) {
+  root.querySelectorAll('[data-ends]').forEach(renderCountdown);
+}
+setInterval(() => tickCountdowns(), 1000);
+
+// Share of the subscription period already used (for progress bars).
+export function periodUsed(startsAt, endsAt) {
+  if (!endsAt) return 0;
+  const start = new Date(startsAt).getTime();
+  const end = new Date(endsAt).getTime();
+  return Math.max(0, Math.min(100, Math.round(((Date.now() - start) / (end - start)) * 100)));
 }

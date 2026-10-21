@@ -1,7 +1,7 @@
 // WhatsApp messages prepared for each recipient. Writing upward (to one's manager or higher) uses a
 // formal address and closing; writing downward (to one's team) uses a collegial, direct tone.
 
-import { state, STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N } from './core.js';
+import { state, STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N, DAYS_N } from './core.js';
 
 export function waUrl(phone, text) {
   return `https://wa.me/${String(phone).replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
@@ -86,4 +86,30 @@ export function requestReminderMessage(request, person, note = '') {
 
 export function generalMessage(person, relation, note) {
   return [salutation(person.name, relation), '', note || '…', closing(relation)].join('\n');
+}
+
+// A company's owner/admin asking the platform team to renew.
+export function renewalRequestMessage(company, note = '') {
+  const me = state.me;
+  const lines = ['حضرة إدارة منصة ابتكار المحترمين،', 'تحية طيبة وبعد،', ''];
+  lines.push(`نرغب في تجديد اشتراك شركة *«${company.name}»* في منصة ابتكار.`);
+  lines.push(`• نوع الاشتراك الحالي: ${company.plan_label}`);
+  if (company.ends_at) lines.push(`• ${company.ok ? 'ينتهي في' : 'انتهى في'}: ${fmtDate(company.ends_at)}`);
+  if (company.seats_used !== undefined) lines.push(`• الحسابات المستخدمة: ${company.seats_used}${company.seats ? ` من ${company.seats}` : ''}`);
+  if (note) lines.push('', note);
+  lines.push('', 'وتفضلوا بقبول فائق الاحترام والتقدير،', `${me.name}${me.job_title ? `\n${me.job_title}` : ''}`, `شركة ${company.name}`);
+  return lines.join('\n');
+}
+
+// The platform owner reminding a company's owner to renew.
+export function renewalReminderMessage(company) {
+  const owner = company.owner;
+  const lines = [`حضرة الأستاذ/ة ${owner.name} المحترم/ة،`, 'تحية طيبة وبعد،', ''];
+  const what = company.plan === 'trial' ? 'الفترة التجريبية لشركة' : 'اشتراك شركة';
+  lines.push(company.ok
+    ? `نودّ تذكيركم بأن ${what} *«${company.name}»* في منصة ابتكار تنتهي بتاريخ ${fmtDate(company.ends_at)}، والمتبقي ${plural(company.days_left, DAYS_N)}.`
+    : `نودّ إعلامكم بأن ${what} *«${company.name}»* في منصة ابتكار انتهى بتاريخ ${fmtDate(company.ends_at)}، وقد توقفت الخدمة مؤقتًا إلى حين التجديد.`);
+  lines.push('', 'يسعدنا تجديد اشتراككم ومواصلة خدمتكم، ويمكنكم الرد على هذه الرسالة لإتمام التجديد أو تعديل عدد الحسابات.');
+  lines.push('', 'مع خالص التحية،', `${state.me.name}`, 'إدارة منصة ابتكار — Ebtikar Software Solutions');
+  return lines.join('\n');
 }

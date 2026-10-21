@@ -12,8 +12,10 @@ import { viewRequests, viewRequest } from './views/requests.js';
 import { viewTeam } from './views/team.js';
 import { viewPeople } from './views/people.js';
 import { viewNotifications } from './views/notifications.js';
+import { viewPlatform, viewCompany } from './views/platform.js';
+import { viewSubscription, subscriptionBanner } from './views/subscription.js';
 
-const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge']);
+const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
 // ---------------------------------------------------------------------------
 // Boot & authentication
@@ -66,9 +68,10 @@ async function showAuth() {
     <div class="auth-card card">
       <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
       <h1>${needsSetup ? 'إعداد النظام' : 'تسجيل الدخول'}</h1>
-      ${needsSetup ? '<p class="muted small">يُنشأ هذا الحساب مرة واحدة ليكون حساب صاحب الشركة.</p>' : ''}
+      ${needsSetup ? '<p class="muted small">يُنشأ هذا الحساب مرة واحدة ليكون حساب مالك المنصة.</p>' : ''}
       <form id="auth-form" novalidate>
         ${needsSetup ? `
+          <div class="field"><label for="f-company">اسم الشركة</label><input id="f-company" name="company_name" value="ابتكار" required></div>
           <div class="field"><label for="f-name">الاسم الكامل</label><input id="f-name" name="name" required autocomplete="name"></div>
           <div class="fields">
             <div class="field"><label for="f-title">المسمى الوظيفي</label><input id="f-title" name="job_title" placeholder="مثال: المدير التنفيذي"></div>
@@ -81,9 +84,13 @@ async function showAuth() {
         <div class="form-error" role="alert"></div>
         <button class="btn lg block" type="submit">${needsSetup ? 'إنشاء الحساب' : 'دخول'}</button>
       </form>
+      ${!needsSetup && state.config.signup ? `<div class="signup-cta"><span class="muted">شركة جديدة؟</span>
+        <a href="#" id="signup">ابدأ تجربة مجانية لمدة ${state.config.trial_days === 30 ? 'شهر' : `${state.config.trial_days} يومًا`}</a></div>` : ''}
     </div>
     <div class="auth-copy">© ${new Date().getFullYear()} Ebtikar Software Solutions</div>`;
   bindPasswordToggles(el);
+  const signup = $('#signup', el);
+  if (signup) signup.addEventListener('click', (e) => { e.preventDefault(); showSignup(); });
   const forgot = $('#forgot', el);
   if (forgot) forgot.addEventListener('click', (e) => { e.preventDefault(); forgotPassword($('#f-email').value); });
   $('#auth-form').addEventListener('submit', async (e) => {
@@ -93,6 +100,44 @@ async function showAuth() {
     try {
       await api('POST', needsSetup ? '/api/setup' : '/api/login', formData(e.target));
       await enterApp();
+    } catch (err) {
+      $('.form-error', e.target).textContent = err.message;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+// A new company registers and starts its free trial.
+function showSignup() {
+  const card = $('#auth .auth-card');
+  card.innerHTML = `
+    <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
+    <h1>تسجيل شركة جديدة</h1>
+    <p class="muted small">تجربة مجانية كاملة المزايا لمدة ${state.config.trial_days || 30} يومًا، دون الحاجة إلى وسيلة دفع.</p>
+    <form id="signup-form" novalidate>
+      <div class="field"><label>اسم الشركة</label><input name="company_name" required></div>
+      <div class="fields">
+        <div class="field"><label>اسمك الكامل</label><input name="name" required autocomplete="name"></div>
+        <div class="field"><label>المسمى الوظيفي</label><input name="job_title" placeholder="مثال: المدير العام"></div>
+      </div>
+      <div class="field"><label>رقم واتساب</label><input name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
+      <div class="field"><label>البريد الإلكتروني</label><div class="input-icon">${icon('user')}<input name="email" type="email" required dir="ltr" autocomplete="username"></div></div>
+      ${passwordField('s-pass', 'password', 'new-password')}
+      <div class="form-error" role="alert"></div>
+      <button class="btn lg block accent" type="submit">إنشاء حساب الشركة وبدء التجربة</button>
+    </form>
+    <div class="signup-cta"><a href="#" id="back-login">لديك حساب بالفعل؟ تسجيل الدخول</a></div>`;
+  bindPasswordToggles(card);
+  $('#back-login', card).addEventListener('click', (e) => { e.preventDefault(); showAuth(); });
+  $('#signup-form', card).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', e.target);
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/signup', formData(e.target));
+      await enterApp();
+      toast('مرحبًا بكم في منصة ابتكار؛ بدأت الفترة التجريبية');
     } catch (err) {
       $('.form-error', e.target).textContent = err.message;
     } finally {
@@ -212,6 +257,7 @@ async function logout() {
 function navItems() {
   const me = state.me;
   return [
+    me.is_platform ? ['platform', 'لوحة إدارة المنصة', 'layers'] : null,
     ['dashboard', 'الرئيسية', 'home'],
     ['projects', 'المشاريع', 'folder'],
     ['tasks', 'المهام', 'tasks'],
@@ -220,6 +266,7 @@ function navItems() {
     me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
     ['people', me.is_admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي', 'users'],
     ['notifications', 'الإشعارات', 'bell', 'notifications'],
+    me.is_admin ? ['subscription', 'الاشتراك', 'shield'] : null,
   ].filter(Boolean);
 }
 
@@ -270,6 +317,8 @@ function moreSheet() {
       ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
       ${sheetItem('#/people', state.me.is_admin ? 'الموظفون والحسابات' : 'الهيكل الوظيفي', 'users')}
       ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
+      ${state.me.is_admin ? sheetItem('#/subscription', 'الاشتراك', 'shield') : ''}
+      ${state.me.is_platform ? sheetItem('#/platform', 'لوحة إدارة المنصة', 'layers') : ''}
       <a class="item link" href="#" data-account>${icon('user')}<span class="grow">حسابي</span></a>
       <a class="item link" href="#" data-logout>${icon('logout')}<span class="grow">تسجيل الخروج</span></a>
     </div>`,
@@ -332,13 +381,32 @@ const routes = {
   team: viewTeam,
   people: viewPeople,
   notifications: viewNotifications,
+  subscription: viewSubscription,
+  platform: (p) => (p.sub ? viewCompany(p.sub) : viewPlatform(p)),
 };
+// Pages that stay reachable while the company's subscription is not active.
+const OPEN_WHEN_LOCKED = new Set(['subscription', 'notifications', 'platform']);
+
+window.addEventListener('subscription-locked', (e) => {
+  if (!state.me) return;
+  state.me.company = { ...state.me.company, ok: false, reason: e.detail || 'expired' };
+  subscriptionBanner();
+  if (!location.hash.startsWith('#/subscription')) location.hash = '#/subscription';
+});
 
 export async function route() {
   if (!state.me) return;
   const [path, qs = ''] = location.hash.replace(/^#\/?/, '').split('?');
-  const [name, id] = path.split('/');
+  const [name, id, sub] = path.split('/');
   const key = routes[name] ? name : 'dashboard';
+  if (state.me.company && !state.me.company.ok && !OPEN_WHEN_LOCKED.has(key)) {
+    // It may have been renewed since; ask the server before locking the page.
+    try { state.me = (await api('GET', '/api/me')).user; } catch { /* keep the cached state */ }
+    if (!state.me.company.ok) {
+      location.hash = '#/subscription';
+      return;
+    }
+  }
   $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === key));
   $$('.modal-backdrop').forEach((m) => m.remove());
   setFab(null);
@@ -346,11 +414,12 @@ export async function route() {
   view.innerHTML = loader();
   window.scrollTo(0, 0);
   try {
-    await routes[key]({ id, query: new URLSearchParams(qs) });
+    await routes[key]({ id, sub, query: new URLSearchParams(qs) });
   } catch (err) {
     view.innerHTML = `<div class="card">${`<div class="empty">${mark()}<h3>تعذّر عرض الصفحة</h3><p>${esc(err.message)}</p>
       <a class="btn subtle" href="#/dashboard">العودة إلى الرئيسية</a></div>`}</div>`;
   }
+  subscriptionBanner();
   pollNotifications();
 }
 window.addEventListener('hashchange', route);

@@ -97,7 +97,8 @@ test('accounts with WhatsApp numbers', async () => {
   assert.equal(me.data.user.chain[0].phone, '201000000002');
 
   const cfg = await client()('GET', '/api/client-config');
-  assert.deepEqual(cfg.data, { otp: messenger.channels, uploads: true });
+  assert.deepEqual(cfg.data.otp, messenger.channels);
+  assert.equal(cfg.data.uploads, true);
 });
 
 test('forgot password with a one-time code', async () => {

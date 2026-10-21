@@ -42,8 +42,11 @@ function sessionCookie(token) {
 
 async function userFromSession(db, token) {
   if (!token) return null;
+  // The company's subscription fields ride along so the access check needs no extra query.
   const row = await db.get(`
-    SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
+    SELECT u.*, c.name AS company_name, c.plan AS company_plan, c.status AS company_status,
+           c.ends_at AS company_ends_at, c.starts_at AS company_starts_at, c.seats AS company_seats
+    FROM sessions s JOIN users u ON u.id = s.user_id LEFT JOIN companies c ON c.id = u.company_id
     WHERE s.token = ? AND s.expires_at > ? AND u.active = 1
   `, token, now());
   return row || null;

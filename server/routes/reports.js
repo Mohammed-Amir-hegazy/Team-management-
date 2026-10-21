@@ -18,7 +18,7 @@ function reportImages(db, reportId) {
 const NOT_ALLOWED = 'ليست لديك صلاحية لتنفيذ هذا الإجراء';
 
 const REPORT_SQL = `
-  SELECT r.*, s.name AS sender_name, s.job_title AS sender_job_title, x.name AS recipient_name,
+  SELECT r.*, s.name AS sender_name, s.job_title AS sender_job_title, s.company_id AS sender_company_id, x.name AS recipient_name,
          CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, t.title AS task_title
   FROM reports r
   JOIN users s ON s.id = r.sender_id
@@ -44,7 +44,8 @@ function listItem(report) {
 async function loadReport(db, user, reportId) {
   const report = await db.get(`${REPORT_SQL} WHERE r.id = ?`, reportId);
   const involved = report && (report.sender_id === user.id || report.recipient_id === user.id);
-  if (!report || (!involved && user.role !== 'owner' && !(await subordinateIds(db, user.id)).has(report.sender_id))) {
+  if (!report || (!involved && !(user.role === 'owner' && report.sender_company_id === user.company_id)
+    && !(await subordinateIds(db, user.id)).has(report.sender_id))) {
     throw new HttpError(404, 'التقرير غير موجود');
   }
   return report;

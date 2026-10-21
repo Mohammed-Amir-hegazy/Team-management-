@@ -15,6 +15,13 @@ services:
         value: "1"
       - key: DEFAULT_COUNTRY_CODE
         value: "20"
+      # Your WhatsApp number (with country code) where companies ask to renew.
+      - key: PLATFORM_CONTACT_PHONE
+        sync: false
+      - key: TRIAL_DAYS
+        value: "30"
+      - key: TRIAL_SEATS
+        value: "10"
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN

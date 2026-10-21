@@ -6,6 +6,7 @@ const http = require('node:http');
 const { openDatabase } = require('./db');
 const { createApp } = require('./app');
 const { startScheduler } = require('./scheduler');
+const { createMessenger } = require('./messaging');
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -20,8 +21,9 @@ function databaseUrl() {
 async function main() {
   const url = databaseUrl();
   const db = await openDatabase(url, process.env.TURSO_AUTH_TOKEN);
-  startScheduler(db);
-  http.createServer(createApp(db)).listen(PORT, () => {
+  const messenger = createMessenger();
+  startScheduler(db, { messenger });
+  http.createServer(createApp(db, { messenger })).listen(PORT, () => {
     const where = url.startsWith('file:') ? url : 'Turso';
     console.log(`Team management is running on http://localhost:${PORT} (database: ${where})`);
   });

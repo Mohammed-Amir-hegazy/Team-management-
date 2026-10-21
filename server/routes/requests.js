@@ -7,7 +7,7 @@ const { requireSupervisor, subordinateIds, notify } = require('../access');
 
 // Items always hang off the original request of a forwarding chain: COALESCE(root_id, id).
 const REQUEST_SQL = `
-  SELECT q.*, s.name AS sender_name, r.name AS recipient_name, r.phone AS recipient_phone, r.job_title AS recipient_job_title,
+  SELECT q.*, s.name AS sender_name, s.company_id AS sender_company_id, r.name AS recipient_name, r.phone AS recipient_phone, r.job_title AS recipient_job_title,
     s.phone AS sender_phone, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, t.title AS task_title,
     (SELECT COUNT(*) FROM requirements x WHERE x.request_id = COALESCE(q.root_id, q.id)) AS items_count
   FROM requests q
@@ -21,7 +21,8 @@ const REQUEST_SQL = `
 async function loadRequest(db, user, requestId) {
   const request = await db.get(`${REQUEST_SQL} WHERE q.id = ?`, requestId);
   const involved = request && (request.sender_id === user.id || request.recipient_id === user.id);
-  if (!request || (!involved && user.role !== 'owner' && !(await subordinateIds(db, user.id)).has(request.sender_id))) {
+  if (!request || (!involved && !(user.role === 'owner' && request.sender_company_id === user.company_id)
+    && !(await subordinateIds(db, user.id)).has(request.sender_id))) {
     throw new HttpError(404, 'الطلب غير موجود');
   }
   return request;

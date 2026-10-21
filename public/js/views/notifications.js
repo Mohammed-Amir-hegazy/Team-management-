@@ -5,6 +5,7 @@ import {
 const TYPE_ICONS = {
   reminder: 'bell', overdue: 'clock', task: 'tasks', status: 'tasks', blocked: 'alert', project: 'folder',
   report: 'report', report_reply: 'reply', request: 'box', request_response: 'box',
+  nudge: 'bell', subscription: 'clock', platform: 'layers',
 };
 
 export async function viewNotifications() {

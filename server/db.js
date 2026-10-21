@@ -3,6 +3,29 @@
 const { createClient } = require('@libsql/client');
 
 const SCHEMA = `
+-- Each customer company is an isolated workspace with its own subscription.
+CREATE TABLE IF NOT EXISTS companies (
+  id              INTEGER PRIMARY KEY,
+  name            TEXT NOT NULL,
+  plan            TEXT NOT NULL CHECK (plan IN ('trial', 'annual', 'owned')),
+  seats           INTEGER,            -- maximum active accounts; NULL means unlimited
+  starts_at       TEXT NOT NULL,
+  ends_at         TEXT,               -- NULL for an owned (perpetual) licence
+  status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended')),
+  notes           TEXT NOT NULL DEFAULT '',
+  reminded_stages TEXT NOT NULL DEFAULT '', -- renewal reminders already sent for the current period
+  created_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS subscription_events (
+  id         INTEGER PRIMARY KEY,
+  company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  kind       TEXT NOT NULL,
+  details    TEXT NOT NULL DEFAULT '',
+  user_id    INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY,
   name          TEXT NOT NULL,
@@ -12,6 +35,9 @@ CREATE TABLE IF NOT EXISTS users (
   supervisor_id INTEGER REFERENCES users(id),
   job_title     TEXT NOT NULL DEFAULT '',
   phone         TEXT NOT NULL DEFAULT '',
+  company_id    INTEGER REFERENCES companies(id),
+  is_platform   INTEGER NOT NULL DEFAULT 0, -- may open the platform dashboard (all companies)
+  last_login_at TEXT,
   roles         TEXT NOT NULL DEFAULT '',
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL
@@ -31,6 +57,7 @@ CREATE TABLE IF NOT EXISTS projects (
   created_by  INTEGER NOT NULL REFERENCES users(id),
   -- Set on a person's hidden project that holds their standalone tasks (tasks outside any project).
   personal_owner_id INTEGER REFERENCES users(id),
+  company_id  INTEGER REFERENCES companies(id),
   created_at  TEXT NOT NULL
 );
 
@@ -230,6 +257,10 @@ const ADDED_COLUMNS = [
   ['reports', 'snapshot', 'TEXT'],
   ['users', 'phone', "TEXT NOT NULL DEFAULT ''"],
   ['projects', 'personal_owner_id', 'INTEGER REFERENCES users(id)'],
+  ['users', 'company_id', 'INTEGER REFERENCES companies(id)'],
+  ['users', 'is_platform', 'INTEGER NOT NULL DEFAULT 0'],
+  ['users', 'last_login_at', 'TEXT'],
+  ['projects', 'company_id', 'INTEGER REFERENCES companies(id)'],
 ];
 
 async function migrate(db) {
@@ -242,6 +273,29 @@ async function migrate(db) {
   await db.run("UPDATE users SET roles = role WHERE roles = ''");
   // Indexes on columns that older databases only gain in the loop above.
   await db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal ON projects(personal_owner_id) WHERE personal_owner_id IS NOT NULL');
+  await db.run('CREATE INDEX IF NOT EXISTS idx_users_company ON users(company_id)');
+  await db.run('CREATE INDEX IF NOT EXISTS idx_projects_company ON projects(company_id)');
+
+  // Single-company installs from before the platform: their people become the "ابتكار" company
+  // with a perpetual licence, and its owner becomes the platform owner.
+  const { n: orphans } = await db.get('SELECT COUNT(*) AS n FROM users WHERE company_id IS NULL');
+  if (orphans > 0) {
+    let company = await db.get('SELECT id FROM companies ORDER BY id LIMIT 1');
+    if (!company) {
+      const ts = now();
+      const r = await db.run(`INSERT INTO companies (name, plan, seats, starts_at, ends_at, created_at)
+        VALUES ('ابتكار', 'owned', NULL, ?, NULL, ?)`, ts, ts);
+      company = { id: r.lastInsertRowid };
+      await db.run(`INSERT INTO subscription_events (company_id, kind, details, created_at) VALUES (?, 'created', ?, ?)`,
+        company.id, 'نُقلت البيانات الحالية إلى هذه الشركة بترخيص ملكية دائمة', ts);
+    }
+    await db.run('UPDATE users SET company_id = ? WHERE company_id IS NULL', company.id);
+    if (!(await db.get('SELECT 1 FROM users WHERE is_platform = 1'))) {
+      await db.run("UPDATE users SET is_platform = 1 WHERE role = 'owner' AND company_id = ?", company.id);
+    }
+  }
+  await db.run(`UPDATE projects SET company_id = (SELECT u.company_id FROM users u WHERE u.id = projects.created_by)
+    WHERE company_id IS NULL`);
 }
 
 function now() {
