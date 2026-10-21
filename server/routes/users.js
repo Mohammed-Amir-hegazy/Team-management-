@@ -11,6 +11,7 @@ const { normalizePhone, maskPhone } = require('../phone');
 const { assertDeletable, deleteAccount, deleteCompany, liveCompanyUsers } = require('../accounts');
 const { isPlatformEmail } = require('../owner');
 const { brandOf } = require('../brand');
+const { decodeImage } = require('../images');
 const crypto = require('node:crypto');
 const {
   accessOf, activeSeats, assertSeatAvailable, createCompany, platformAdmins, PLAN_LABELS,
@@ -279,6 +280,38 @@ module.exports = function register(router) {
     const phone = await readPhone(db, body.phone, config, user.id);
     await db.run('UPDATE users SET phone = ? WHERE id = ?', phone, user.id);
     return { user: await withSupervisorName(db, await getUser(db, user.id)) };
+  }, { ungated: true });
+
+  // Everyone adds, changes or removes their own profile photo.
+  router.post('/api/me/photo', async ({ db, user, body }) => {
+    const { buf, mime } = decodeImage(body.data, 400 * 1024, 'الصورة');
+    await db.transaction(async (tx) => {
+      await tx.run(`INSERT INTO user_photos (user_id, data, mime, updated_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT (user_id) DO UPDATE SET data = excluded.data, mime = excluded.mime, updated_at = excluded.updated_at`,
+      user.id, buf, mime, now());
+      await tx.run('UPDATE users SET photo_version = photo_version + 1 WHERE id = ?', user.id);
+    });
+    return { user: await withSupervisorName(db, await getUser(db, user.id)) };
+  }, { ungated: true, maxBody: 1024 * 1024 });
+
+  router.delete('/api/me/photo', async ({ db, user }) => {
+    await db.run('DELETE FROM user_photos WHERE user_id = ?', user.id);
+    await db.run('UPDATE users SET photo_version = 0 WHERE id = ?', user.id);
+    return { user: await withSupervisorName(db, await getUser(db, user.id)) };
+  }, { ungated: true });
+
+  // Photos are seen by people of the same company (and the platform owner).
+  router.get('/api/users/:id/photo', async ({ db, user, params, res }) => {
+    const owner = await getUser(db, v.id(params.id, 'المستخدم'));
+    const row = owner && (owner.company_id === user.company_id || user.is_platform)
+      ? await db.get('SELECT data, mime FROM user_photos WHERE user_id = ?', owner.id) : null;
+    if (!row) throw new HttpError(404, 'الصورة غير موجودة');
+    const buf = Buffer.isBuffer(row.data) ? row.data : Buffer.from(row.data);
+    res.writeHead(200, {
+      'Content-Type': row.mime, 'Content-Length': buf.length,
+      'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(buf);
   }, { ungated: true });
 
   // Anyone may delete their own account. A company owner who is alone in the company deletes the company with it.

@@ -74,9 +74,10 @@ async function deleteAccount(db, target, actor) {
     await tx.run('DELETE FROM sessions WHERE user_id = ?', target.id);
     await tx.run('DELETE FROM notifications WHERE user_id = ?', target.id);
     await tx.run('DELETE FROM password_resets WHERE user_id = ?', target.id);
+    await tx.run('DELETE FROM user_photos WHERE user_id = ?', target.id);
     const placeholder = `deleted-${target.id}-${crypto.randomBytes(4).toString('hex')}@deleted.invalid`;
     await tx.run(`UPDATE users SET name = ?, email = ?, phone = '', job_title = '', password_hash = '!', active = 0,
-      is_platform = 0, deleted_at = ? WHERE id = ?`, DELETED_NAME, placeholder, ts, target.id);
+      is_platform = 0, photo_version = 0, deleted_at = ? WHERE id = ?`, DELETED_NAME, placeholder, ts, target.id);
     await logEvent(tx, target.company_id, 'user_deleted', target.id === actor.id ? `${target.name} (بطلب منه)` : target.name,
       target.id === actor.id ? null : actor.id);
     return { moved_tasks: moved };
@@ -101,7 +102,7 @@ async function deleteCompany(db, companyId) {
     await tx.run(`DELETE FROM requests WHERE sender_id IN (${inCompany}) OR recipient_id IN (${inCompany})`, companyId, companyId);
     await tx.run(`DELETE FROM attachments WHERE uploaded_by IN (${inCompany})`, companyId);
     await tx.run(`DELETE FROM task_status_history WHERE user_id IN (${inCompany})`, companyId);
-    for (const table of ['notifications', 'sessions', 'password_resets', 'project_members']) {
+    for (const table of ['notifications', 'sessions', 'password_resets', 'project_members', 'user_photos']) {
       await tx.run(`DELETE FROM ${table} WHERE user_id IN (${inCompany})`, companyId);
     }
     await tx.run('DELETE FROM images WHERE company_id = ?', companyId);

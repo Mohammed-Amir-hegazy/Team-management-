@@ -1,6 +1,6 @@
 // Shared state, formatting, API access and UI building blocks.
 
-export const state = { me: null, config: { otp: {}, uploads: false }, lastNotificationId: 0, pollTimer: null, counts: {} };
+export const state = { me: null, config: { otp: {}, uploads: false }, lastNotificationId: 0, pollTimer: null, counts: {}, photos: new Map() };
 
 export const ROLE_LABELS = {
   owner: 'صاحب الشركة', admin: 'مسؤول النظام', manager: 'مدير', team_leader: 'قائد فريق', employee: 'موظف',
@@ -279,10 +279,21 @@ export async function busy(button, fn) {
 
 const AVATAR_COLORS = ['#5146E1', '#06044B', '#1FA35C', '#7B72FF', '#0E7490', '#B4236B', '#C2410C'];
 
+// People's profile photos by id, learnt from the people lists the app loads.
+export function rememberPhotos(users) {
+  for (const u of users || []) {
+    if (!u || !u.id || !('photo_url' in u)) continue;
+    if (u.photo_url) state.photos.set(u.id, u.photo_url); else state.photos.delete(u.id);
+  }
+}
+
+// A person's photo, or their initials on their colour when they have none.
 export function avatar(name, id = 0, size = '') {
+  const photo = state.photos.get(Number(id));
+  if (photo) return `<span class="avatar photo ${size}" data-uid="${Number(id)}" title="${esc(name)}"><img src="${esc(photo)}" alt="" loading="lazy"></span>`;
   const initials = String(name || '؟').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('');
   const color = AVATAR_COLORS[Math.abs(Number(id) || 0) % AVATAR_COLORS.length];
-  return `<span class="avatar ${size}" style="--c:${color}" title="${esc(name)}">${esc(initials)}</span>`;
+  return `<span class="avatar ${size}" data-uid="${Number(id)}" style="--c:${color}" title="${esc(name)}">${esc(initials)}</span>`;
 }
 
 export const statusPill = (status, cls = '') => `<span class="pill st-${status} ${cls}">${STATUS_LABELS[status]}</span>`;

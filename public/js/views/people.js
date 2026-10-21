@@ -1,6 +1,6 @@
 import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal,
-  ROLE_LABELS, ORG_ROLES, avatar, emptyState,
+  ROLE_LABELS, ORG_ROLES, avatar, emptyState, rememberPhotos,
 } from '../core.js';
 import { openReminder } from '../remind.js';
 import { openWhatsApp, generalMessage } from '../whatsapp.js';
@@ -40,6 +40,7 @@ function personCard(u, admin) {
 
 export async function viewPeople() {
   const { users, can_manage_accounts: admin, seats } = await api('GET', '/api/users');
+  rememberPhotos(users);
   setTitle(admin ? 'المستخدمين' : 'الهيكل الوظيفي');
   const byId = new Map(users.map((u) => [u.id, u]));
   const children = new Map();

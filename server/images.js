@@ -30,6 +30,11 @@ function decode(dataUrl, max, label) {
   return { buf, mime };
 }
 
+// A profile photo or other small picture: JPEG, PNG or WebP only.
+function decodeImage(dataUrl, max, label) {
+  return decode(dataUrl, max, label);
+}
+
 async function storeImage(db, user, body) {
   const full = decode(body.data, MAX_IMAGE, 'الصورة');
   const thumb = body.thumb ? decode(body.thumb, MAX_THUMB, 'الصورة المصغّرة') : full;
@@ -97,4 +102,4 @@ async function purgeOrphanImages(db, olderThanMs = 24 * 3600 * 1000) {
   return r.changes;
 }
 
-module.exports = { storeImage, sendImage, validateImages, destroyImage, purgeOrphanImages };
+module.exports = { storeImage, sendImage, validateImages, destroyImage, purgeOrphanImages, decodeImage };

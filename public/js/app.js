@@ -2,7 +2,7 @@
 
 import {
   state, $, $$, esc, icon, mark, api, toast, openModal, formData, avatar, loader, setFab,
-  ROLE_LABELS, busy, creatorFields, bindCreatorFields,
+  ROLE_LABELS, busy, creatorFields, bindCreatorFields, rememberPhotos,
 } from './core.js';
 import { viewDashboard } from './views/dashboard.js';
 import { viewProjects, viewProject } from './views/projects.js';
@@ -31,6 +31,7 @@ async function boot() {
   try {
     const { user } = await api('GET', '/api/me');
     state.me = user;
+    await loadPhotos();
     await minSplash;
     showApp();
   } catch {
@@ -226,7 +227,29 @@ function showLoginCode(challenge) {
 async function enterApp() {
   const { user } = await api('GET', '/api/me');
   state.me = user;
+  await loadPhotos();
   showApp();
+}
+
+// Profile photos of the people I can see, so every avatar can show one.
+async function loadPhotos() {
+  rememberPhotos([state.me]);
+  try {
+    rememberPhotos((await api('GET', '/api/users')).users);
+  } catch { /* initials until the people list can be read */ }
+}
+
+// A square crop from the middle of the picture, small enough for an avatar.
+async function squarePhoto(file, size = 360) {
+  const bitmap = await createImageBitmap(file);
+  const side = Math.min(bitmap.width, bitmap.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.min(size, side);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.86);
 }
 
 // Two steps in one sheet: ask for a code (email / SMS / WhatsApp), then set a new password with it.
@@ -355,8 +378,7 @@ function showApp() {
 
   $('#side-nav').innerHTML = navItems().map(([key, label, ic, badge]) =>
     `<a href="#/${key}" data-nav="${key}">${icon(ic)}<span>${label}</span>${badge ? `<span class="count hidden" data-count-for="${badge}"></span>` : ''}</a>`).join('');
-  $('#side-user').innerHTML = `${avatar(me.name, me.id)}
-    <div class="grow"><div class="name">${esc(me.name)}</div><div class="title">${esc(me.job_title || ROLE_LABELS[me.role])}</div></div>${icon('more')}`;
+  drawSideUser();
   $('#side-user').onclick = accountSheet;
   $('#bell').innerHTML = `${icon('bell')}<span class="dot hidden" id="bell-dot"></span>`;
   if (!$('#topbar [data-theme-btn]')) $('#bell').insertAdjacentHTML('beforebegin', themeButton());
@@ -408,16 +430,25 @@ function moreSheet() {
   });
 }
 
+function drawSideUser() {
+  const me = state.me;
+  $('#side-user').innerHTML = `${avatar(me.name, me.id)}
+    <div class="grow"><div class="name">${esc(me.name)}</div><div class="title">${esc(me.job_title || ROLE_LABELS[me.role])}</div></div>${icon('more')}`;
+}
+
 function accountSheet() {
   const me = state.me;
   const { el } = openModal({
     title: 'حسابي',
     body: `
-      <div class="row" style="margin-bottom:1rem">${avatar(me.name, me.id, 'lg')}
+      <div class="profile-photo">${avatar(me.name, me.id, 'xl')}
         <div class="grow"><h3 style="margin:0">${esc(me.name)}</h3>
           <div class="muted">${esc(me.job_title || ROLE_LABELS[me.role])}</div>
-          <div class="row wrap" style="gap:.3rem;margin-top:.35rem">${me.roles.map((r) => `<span class="pill blue plain">${ROLE_LABELS[r]}</span>`).join('')}</div>
-        </div></div>
+          <div class="row wrap" style="gap:.3rem;margin:.35rem 0 .6rem">${me.roles.map((r) => `<span class="pill blue plain">${ROLE_LABELS[r]}</span>`).join('')}</div>
+          <div class="actions">
+            <button class="btn sm subtle" type="button" data-photo-up>${icon('camera')}<span>${me.photo_url ? 'تغيير الصورة' : 'إضافة صورة'}</span></button>
+            <button class="btn sm ghost danger-text ${me.photo_url ? '' : 'hidden'}" type="button" data-photo-del>${icon('trash')}حذف الصورة</button>
+          </div></div></div>
       <div class="list" style="margin-bottom:1rem">
         <div class="item">${icon('user')}<span class="grow">البريد الإلكتروني</span><span class="muted" dir="ltr">${esc(me.email)}</span></div>
         <div class="item">${icon('users')}<span class="grow">المسؤول المباشر</span><span class="muted">${esc(me.supervisor_name || '—')}</span></div>
@@ -443,6 +474,44 @@ function accountSheet() {
     footer: false,
   });
   $('[data-logout]', el).addEventListener('click', () => { el.remove(); logout(); });
+  // The new photo shows straight away wherever my avatar is: this sheet, the sidebar and the page behind.
+  const photoChanged = (user) => {
+    state.me.photo_url = user.photo_url;
+    rememberPhotos([state.me]);
+    $$(`.avatar[data-uid="${me.id}"]`).forEach((a) => {
+      a.outerHTML = avatar(me.name, me.id, ['sm', 'lg', 'xl'].find((c) => a.classList.contains(c)) || '');
+    });
+  };
+  // After the spinner has given the button its label back.
+  const syncPhotoButtons = () => {
+    $('[data-photo-up] span', el).textContent = state.me.photo_url ? 'تغيير الصورة' : 'إضافة صورة';
+    $('[data-photo-del]', el).classList.toggle('hidden', !state.me.photo_url);
+  };
+  $('[data-photo-up]', el).addEventListener('click', (e) => {
+    const button = e.currentTarget;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      busy(button, async () => {
+        let data;
+        try {
+          data = await squarePhoto(file);
+        } catch {
+          throw new Error('تعذّرت قراءة الصورة؛ يُرجى اختيار صورة بصيغة JPG أو PNG');
+        }
+        photoChanged((await api('POST', '/api/me/photo', { data })).user);
+        toast('تم حفظ صورتك');
+      }).then(syncPhotoButtons);
+    });
+    input.click();
+  });
+  $('[data-photo-del]', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
+    photoChanged((await api('DELETE', '/api/me/photo')).user);
+    toast('تم حذف صورتك');
+  }).then(syncPhotoButtons));
   $('[data-delete-account]', el).addEventListener('click', () => { el.remove(); deleteMyAccount(); });
   $('[data-save-phone]', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
     const { user } = await api('PATCH', '/api/me', { phone: $('[name=phone]', el).value });

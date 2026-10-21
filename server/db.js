@@ -170,6 +170,14 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Each person's own profile photo (a small square JPEG made in the browser).
+CREATE TABLE IF NOT EXISTS user_photos (
+  user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  data       BLOB NOT NULL,
+  mime       TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- A company's own identity for its reports: colours, font (a web font or an uploaded file) and logo.
 CREATE TABLE IF NOT EXISTS company_brands (
   company_id      INTEGER PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
@@ -303,6 +311,7 @@ const ADDED_COLUMNS = [
   ['users', 'last_login_at', 'TEXT'],
   ['users', 'deleted_at', 'TEXT'],
   ['projects', 'company_id', 'INTEGER REFERENCES companies(id)'],
+  ['users', 'photo_version', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 async function migrate(db) {

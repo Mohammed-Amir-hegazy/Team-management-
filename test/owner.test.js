@@ -267,3 +267,35 @@ test('each company sets its own logo, colours and font for its reports', async (
   assert.equal(reset.data.brand.primary_color, '#06044B');
   assert.equal(reset.data.brand.logo_url, null);
 });
+
+test('everyone adds, changes and removes their own profile photo', async () => {
+  const a = client();
+  await a('POST', '/api/signup', { company_name: 'Faces', name: 'Face Owner', email: 'o@faces.co', password: 'secret123' });
+  const me = (await a('GET', '/api/me')).data.user;
+  assert.equal(me.photo_url, null);
+  const emp = (await a('POST', '/api/users', { name: 'E', email: 'e@faces.co', password: 'secret123', roles: ['employee'], supervisor_id: me.id })).data.user;
+  const e = client();
+  await e('POST', '/api/login', { email: 'e@faces.co', password: 'secret123' });
+
+  const jpeg = (n) => `data:image/jpeg;base64,${Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(300, n)]).toString('base64')}`;
+  assert.equal((await e('POST', '/api/me/photo', { data: 'data:image/png;base64,aGVsbG8=' })).status, 400);
+  const first = await e('POST', '/api/me/photo', { data: jpeg(1) });
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  assert.match(first.data.user.photo_url, new RegExp(`^/api/users/${emp.id}/photo\\?v=1$`));
+  const changed = await e('POST', '/api/me/photo', { data: jpeg(2) });
+  assert.match(changed.data.user.photo_url, /\?v=2$/, 'a new version so caches refresh');
+
+  // Colleagues see it in the people list; other companies cannot fetch it.
+  const listed = (await a('GET', '/api/users')).data.users.find((u) => u.id === emp.id);
+  assert.equal(listed.photo_url, changed.data.user.photo_url);
+  const cookieOf = async (email) => (await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: 'secret123' }) })).headers.get('set-cookie').split(';')[0];
+  const seen = await fetch(base + listed.photo_url, { headers: { Cookie: await cookieOf('o@faces.co') } });
+  assert.equal(seen.status, 200);
+  assert.equal(Buffer.from(await seen.arrayBuffer())[4], 2);
+  assert.equal((await fetch(base + listed.photo_url, { headers: { Cookie: await cookieOf('o@pix.co') } })).status, 404);
+
+  // Removing it brings back the initials.
+  assert.equal((await e('DELETE', '/api/me/photo')).data.user.photo_url, null);
+  assert.equal((await fetch(base + listed.photo_url, { headers: { Cookie: await cookieOf('o@faces.co') } })).status, 404);
+});

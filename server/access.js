@@ -230,6 +230,8 @@ function publicUser(user) {
     is_platform: !!user.is_platform,
     company_id: user.company_id,
     supervisor_id: user.supervisor_id,
+    // Versioned so a changed photo is fetched again while an unchanged one stays cached.
+    photo_url: user.photo_version ? `/api/users/${user.id}/photo?v=${user.photo_version}` : null,
     active: !!user.active,
     created_at: user.created_at,
   };
