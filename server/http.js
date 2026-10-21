@@ -44,13 +44,13 @@ class Router {
 
 const MAX_BODY = 1024 * 1024;
 
-function readJson(req) {
+function readJson(req, maxBody = MAX_BODY) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (chunk) => {
       size += chunk.length;
-      if (size > MAX_BODY) {
+      if (size > maxBody) {
         reject(new HttpError(413, 'حجم البيانات المرسلة أكبر من الحد المسموح به'));
         req.destroy();
         return;

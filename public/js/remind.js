@@ -2,7 +2,7 @@
 // or a general note. Sent as an in-app alert and/or a WhatsApp message worded for the recipient.
 
 import { $, esc, icon, api, toast, openModal, avatar, busy, STATUS_LABELS, ROLE_LABELS } from './core.js';
-import { openWhatsApp, taskReminderMessage, requestReminderMessage, generalMessage } from './whatsapp.js';
+import { launchWhatsApp, waPreview, taskReminderMessage, requestReminderMessage, generalMessage } from './whatsapp.js';
 
 export async function openReminder({ person, relation, task = null, request = null }) {
   let subjects = [];
@@ -33,13 +33,19 @@ export async function openReminder({ person, relation, task = null, request = nu
         ${subjects.map((s) => `<option value="${s.key}">${esc(s.label)}</option>`).join('')}</select></div>` : `<input type="hidden" name="subject" value="${subjects[0].key}">`}
       <div class="field"><label>ملاحظة إضافية <span class="hint" id="note-hint">(اختياري)</span></label>
         <textarea name="note" rows="3" placeholder="${relation === 'up' ? 'مثال: نحتاج إلى الرد قبل اجتماع الغد' : 'مثال: يُرجى تسليمها قبل نهاية اليوم'}"></textarea></div>
-      <div class="field"><label>نص الرسالة كما سيصل</label><div class="wa-preview pre" id="preview"></div></div>
+      <div class="field"><label>نص رسالة واتساب <span class="hint">— يمكنك تعديله بالكامل قبل الإرسال</span></label>
+        <textarea name="text" class="msg-edit" rows="10"></textarea>
+        <div class="row wrap" style="gap:.5rem;margin-top:.35rem">
+          <span class="hint grow">النص بين نجمتين *هكذا* يظهر بخط عريض.</span>
+          <button type="button" class="link-btn small" id="reset-text" hidden>${icon('undo')} استعادة النص المقترح</button></div></div>
+      <details class="msg-preview"><summary>معاينة كما ستظهر في واتساب</summary><div class="wa-preview pre" id="preview"></div></details>
       <div class="form-error" role="alert"></div>
       <div class="modal-actions wrap">
-        <button type="button" class="btn wa" id="send-wa" ${person.phone ? '' : 'disabled'}>${icon('whatsapp')}إرسال عبر واتساب</button>
+        <button type="button" class="btn wa" id="send-wa">${icon('whatsapp')}إرسال عبر واتساب</button>
         <button type="button" class="btn" id="send-app">${icon('bell')}تنبيه داخل المنصة</button>
       </div>
-      ${person.phone ? '' : '<p class="muted small" style="margin-top:.5rem">لا يوجد رقم واتساب مسجّل لهذا الشخص؛ يمكن لمسؤول النظام إضافته.</p>'}`,
+      <p class="muted small" style="margin-top:.5rem">التنبيه داخل المنصة يصل بموضوع التذكير مع ملاحظتك الإضافية.${person.phone ? ''
+        : ' لا يوجد رقم واتساب مسجّل لهذا الشخص؛ سيُطلب منك اختيار جهة الاتصال من واتساب.'}</p>`,
   });
 
   const form = $('form', el);
@@ -51,19 +57,26 @@ export async function openReminder({ person, relation, task = null, request = nu
     if (s.request) return requestReminderMessage(s.request, person, note);
     return generalMessage(person, relation, note);
   };
+  // The suggested text follows the subject and note until the person edits it themselves.
+  const area = form.elements.text;
+  const resetBtn = $('#reset-text', el);
+  let edited = false;
   const refresh = () => {
-    // Show WhatsApp's *bold* the way the recipient will see it.
-    $('#preview', el).innerHTML = esc(message()).replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>');
+    if (!edited) area.value = message();
+    resetBtn.hidden = !edited;
+    $('#preview', el).innerHTML = waPreview(area.value);
     $('#note-hint', el).textContent = current().key === 'general' ? '(مطلوبة)' : '(اختياري)';
   };
   refresh();
-  form.addEventListener('input', refresh);
+  form.addEventListener('input', (e) => { if (e.target === area) edited = area.value !== message(); refresh(); });
   form.addEventListener('change', refresh);
+  resetBtn.addEventListener('click', () => { edited = false; refresh(); });
   const error = (msg) => { $('.form-error', el).textContent = msg; };
 
   $('#send-wa', el).addEventListener('click', () => {
-    if (current().key === 'general' && !form.elements.note.value.trim()) { error('يُرجى كتابة نص التذكير'); return; }
-    openWhatsApp(person.phone, message());
+    if (current().key === 'general' && !edited && !form.elements.note.value.trim()) { error('يُرجى كتابة نص التذكير'); return; }
+    if (!area.value.trim()) { error('نص الرسالة فارغ'); return; }
+    launchWhatsApp(person.phone, area.value);
     close();
   });
   $('#send-app', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {

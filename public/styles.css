@@ -936,3 +936,10 @@ input[type="checkbox"] { width: auto; accent-color: var(--primary); }
 .theme-btn:active svg { transform: rotate(-40deg) scale(.85); }
 .auth-theme { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 14px; z-index: 2; color: #fff; background: rgba(255, 255, 255, .12); }
 .auth-theme:hover { background: rgba(255, 255, 255, .2); }
+
+/* Reviewing a message before it is sent */
+textarea.msg-edit { min-height: 220px; line-height: 1.75; font-size: .92rem; resize: vertical; }
+.msg-preview { margin-bottom: .6rem; }
+.msg-preview summary { cursor: pointer; color: var(--primary); font-size: .88rem; margin-bottom: .5rem; }
+.link-btn.small { font-size: .84rem; display: inline-flex; align-items: center; gap: .25rem; }
+.link-btn.small svg { width: 1em; height: 1em; }

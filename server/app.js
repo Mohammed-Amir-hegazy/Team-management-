@@ -20,7 +20,7 @@ function createApp(db, {
   router.get('/api/health', () => ({ ok: true }), { public: true });
   // Which optional integrations are switched on, so the interface only offers what works.
   router.get('/api/client-config', () => ({
-    otp: messenger.channels, uploads: !!config.cloudinary, signup: !!config.allowSignup, trial_days: config.trialDays,
+    otp: messenger.channels, uploads: true, signup: !!config.allowSignup, trial_days: config.trialDays,
     storage_warning: !!config.ephemeralStorage,
   }), { public: true });
   require('./routes/users')(router);
@@ -61,7 +61,7 @@ function createApp(db, {
         // A JSON content type cannot be sent cross-site without a CORS preflight, which blocks CSRF.
         const type = req.headers['content-type'] || '';
         if (!type.startsWith('application/json')) throw new HttpError(415, 'يجب إرسال البيانات بصيغة JSON');
-        ctx.body = await readJson(req);
+        ctx.body = await readJson(req, found.route.options.maxBody);
       }
       ctx.user = await userFromSession(db, ctx.cookies.sid);
       if (!found.route.options.public && !ctx.user) throw new HttpError(401, 'يُرجى تسجيل الدخول أولًا');
@@ -71,6 +71,8 @@ function createApp(db, {
         if (!access.ok) throw accessError(access.reason);
       }
       const result = await found.route.handler(ctx);
+      // Handlers that stream a file (images) answer by themselves.
+      if (res.headersSent) return;
       sendJson(res, 200, result ?? { ok: true });
     } catch (err) {
       if (err instanceof HttpError) {

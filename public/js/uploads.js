@@ -1,4 +1,5 @@
-// Image uploads straight from the browser to Cloudinary (signed by our server), plus a lightbox.
+// Image uploads: straight from the browser to Cloudinary (signed by our server) when it is configured,
+// otherwise resized here and kept by our own server. Plus a gallery and a lightbox.
 
 import { api, esc, icon, openModal } from './core.js';
 
@@ -28,6 +29,49 @@ async function shrink(file, maxSide = 2000, quality = 0.85) {
   } catch {
     return file;
   }
+}
+
+function readAsDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('تعذّرت قراءة الصورة'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+// A JPEG no larger than maxSide (white behind transparent PNGs), as a data URL.
+async function encode(bitmap, maxSide, quality) {
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+  if (!blob) throw new Error('تعذّرت معالجة الصورة');
+  return { data: await readAsDataUrl(blob), size: blob.size, width: canvas.width, height: canvas.height };
+}
+
+// Our own storage: a full-size copy (≤ 1.4 MB) and a small thumbnail for galleries.
+async function uploadLocal(file, signParams, onProgress) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`الملف «${file.name || 'الصورة'}» ليس صورة مدعومة`);
+  }
+  let full = await encode(bitmap, 1800, 0.84);
+  if (full.size > 1.4 * 1024 * 1024) full = await encode(bitmap, 1400, 0.72);
+  const small = await encode(bitmap, 420, 0.74);
+  onProgress(0.3);
+  const res = await api('POST', '/api/uploads/image', {
+    ...signParams, data: full.data, thumb: small.data, width: full.width, height: full.height,
+  });
+  onProgress(1);
+  return res;
 }
 
 function uploadOne(file, sig, onProgress) {
@@ -61,15 +105,18 @@ export async function uploadImages(files, signParams, onProgress = () => {}) {
   const sig = await api('POST', '/api/uploads/sign', signParams);
   const results = [];
   for (let i = 0; i < files.length; i++) {
-    const file = await shrink(files[i]);
-    results.push(await uploadOne(file, sig, (p) => onProgress((i + p) / files.length)));
+    const progress = (p) => onProgress((i + p) / files.length);
+    if (sig.mode === 'local') results.push(await uploadLocal(files[i], signParams, progress));
+    else results.push(await uploadOne(await shrink(files[i]), sig, progress));
   }
   onProgress(1);
   return results;
 }
 
-// Cloudinary delivers resized copies when the transformation is placed after "/upload/".
+// Cloudinary delivers resized copies when the transformation is placed after "/upload/";
+// our own storage keeps a thumbnail next to each photo.
 export function thumb(url, size = 320) {
+  if (String(url).startsWith('/api/images/')) return `${url}?size=thumb`;
   return String(url).replace('/image/upload/', `/image/upload/c_fill,w_${size},h_${size},q_auto,f_auto/`);
 }
 

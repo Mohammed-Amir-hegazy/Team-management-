@@ -170,6 +170,19 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Task and report photos kept in the database when Cloudinary is not configured (resized in the browser).
+CREATE TABLE IF NOT EXISTS images (
+  id          TEXT PRIMARY KEY,
+  company_id  INTEGER,
+  uploaded_by INTEGER NOT NULL,
+  mime        TEXT NOT NULL,
+  data        BLOB NOT NULL,
+  thumb_mime  TEXT NOT NULL,
+  thumb       BLOB NOT NULL,
+  size        INTEGER NOT NULL,
+  created_at  TEXT NOT NULL
+);
+
 -- Second login step for the platform owner: a short-lived code sent by WhatsApp, SMS or email.
 CREATE TABLE IF NOT EXISTS login_challenges (
   token      TEXT PRIMARY KEY,

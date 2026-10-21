@@ -1,14 +1,69 @@
 // WhatsApp messages prepared for each recipient. Writing upward (to one's manager or higher) uses a
 // formal address and closing; writing downward (to one's team) uses a collegial, direct tone.
 
-import { state, STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N, DAYS_N } from './core.js';
+import {
+  state, $, esc, icon, toast, openModal, STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N, DAYS_N,
+} from './core.js';
 
+// Without a number WhatsApp opens its contact picker.
 export function waUrl(phone, text) {
-  return `https://wa.me/${String(phone).replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
+  return `https://wa.me/${String(phone || '').replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
 }
 
-export function openWhatsApp(phone, text) {
+export function launchWhatsApp(phone, text) {
   window.open(waUrl(phone, text), '_blank', 'noopener');
+}
+
+// Shows *bold* the way WhatsApp will.
+export function waPreview(text) {
+  return esc(text).replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>');
+}
+
+// Every WhatsApp message is reviewed first: the number and the whole text can be changed (or the text
+// copied) before anything leaves; nothing is sent until "إرسال" is pressed.
+export function openWhatsApp(phone, text, { name = '' } = {}) {
+  const digits = String(phone || '').replace(/\D/g, '');
+  const { el, close } = openModal({
+    title: 'مراجعة الرسالة قبل الإرسال',
+    wide: true,
+    footer: false,
+    body: `
+      <p class="muted small" style="margin-top:0">يمكنك تعديل الرقم ونص الرسالة كما تشاء؛ لن يُرسل شيء قبل الضغط على «إرسال عبر واتساب».</p>
+      <div class="field"><label>رقم واتساب${name ? ` — ${esc(name)}` : ''} <span class="hint">(اتركه فارغًا لاختيار جهة الاتصال من واتساب)</span></label>
+        <input name="phone" type="tel" dir="ltr" value="${digits ? `+${digits}` : ''}" placeholder="2010xxxxxxxx+"></div>
+      <div class="field"><label>نص الرسالة</label>
+        <textarea name="text" class="msg-edit" rows="12">${esc(text)}</textarea>
+        <span class="hint">النص بين نجمتين *هكذا* يظهر بخط عريض في واتساب.</span></div>
+      <details class="msg-preview"><summary>معاينة كما ستظهر في واتساب</summary><div class="wa-preview pre" data-preview></div></details>
+      <div class="modal-actions wrap">
+        <button type="button" class="btn wa" data-send>${icon('whatsapp')}إرسال عبر واتساب</button>
+        <button type="button" class="btn ghost" data-copy>${icon('copy')}نسخ النص</button>
+        <button type="button" class="btn ghost" data-reset disabled>${icon('undo')}استعادة النص المقترح</button>
+      </div>`,
+  });
+  const area = $('[name=text]', el);
+  const reset = $('[data-reset]', el);
+  const sync = () => {
+    $('[data-preview]', el).innerHTML = waPreview(area.value);
+    reset.disabled = area.value === text;
+  };
+  sync();
+  area.addEventListener('input', sync);
+  reset.addEventListener('click', () => { area.value = text; sync(); area.focus(); });
+  $('[data-copy]', el).addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(area.value);
+      toast('تم نسخ نص الرسالة');
+    } catch {
+      area.select();
+      toast('حدّد النص وانسخه يدويًا', { error: true });
+    }
+  });
+  $('[data-send]', el).addEventListener('click', () => {
+    if (!area.value.trim()) { toast('نص الرسالة فارغ', { error: true }); return; }
+    launchWhatsApp($('[name=phone]', el).value, area.value);
+    close();
+  });
 }
 
 const appLink = (hash) => `${location.origin}/${hash}`;
@@ -57,7 +112,7 @@ export function reportMessage(report, recipient, relation = 'up') {
   }
   const images = [...(report.images || []), ...((report.snapshot && report.snapshot.tasks) || []).flatMap((t) => t.images || [])];
   if (images.length) {
-    lines.push('', '*الصور المرفقة:*', ...images.slice(0, 8).map((img) => img.url));
+    lines.push('', '*الصور المرفقة:*', ...images.slice(0, 8).map((img) => (img.url.startsWith('/') ? `${location.origin}${img.url}` : img.url)));
   }
   lines.push('', 'رابط التقرير على منصة ابتكار:', appLink(`#/reports/${report.id}`), closing(relation));
   return lines.join('\n');

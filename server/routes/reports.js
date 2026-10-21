@@ -9,7 +9,7 @@ const {
 const {
   TASK_FIELDS, TASK_FROM, placeholders, markOverdue, summarize, memberStats, workSnapshot, EMPTY_STATS,
 } = require('../snapshot');
-const { validateImages } = require('../cloudinary');
+const { validateImages } = require('../images');
 
 function reportImages(db, reportId) {
   return db.all('SELECT id, url, caption, width, height FROM attachments WHERE report_id = ? ORDER BY id', reportId);
@@ -99,7 +99,7 @@ module.exports = function register(router) {
     else if (projectId) await loadProject(db, user, projectId);
     const snapshot = body.include_status === false ? null
       : JSON.stringify(await workSnapshot(db, user, { projectId, taskId }));
-    const images = Array.isArray(body.images) && body.images.length ? validateImages(config, body.images) : [];
+    const images = Array.isArray(body.images) && body.images.length ? await validateImages(db, config, user, body.images) : [];
 
     const id = await db.transaction(async (tx) => {
       const r = await tx.run(`

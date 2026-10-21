@@ -160,3 +160,50 @@ test('the code falls back to another channel and locks after too many tries', as
   assert.equal(other.status, 200);
   assert.ok(other.data.user);
 });
+
+test('photos are kept by the platform itself when Cloudinary is not configured', async () => {
+  const a = client();
+  await a('POST', '/api/signup', { company_name: 'Pix', name: 'Pix Owner', email: 'o@pix.co', password: 'secret123' });
+  const task = (await a('POST', '/api/tasks', { title: 'Shoot' })).data.task;
+  const cfg = (await a('GET', '/api/client-config')).data;
+  assert.equal(cfg.uploads, true);
+  assert.equal((await a('POST', '/api/uploads/sign', { purpose: 'task', task_id: task.id })).data.mode, 'local');
+
+  const jpeg = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(2000, 7)]);
+  const small = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(100, 3)]);
+  const dataUrl = (b) => `data:image/jpeg;base64,${b.toString('base64')}`;
+  assert.equal((await a('POST', '/api/uploads/image', { purpose: 'task', task_id: task.id, data: 'data:image/jpeg;base64,aGVsbG8=' })).status, 400, 'not really an image');
+  const up = await a('POST', '/api/uploads/image', { purpose: 'task', task_id: task.id, data: dataUrl(jpeg), thumb: dataUrl(small), width: 800, height: 600 });
+  assert.equal(up.status, 200, JSON.stringify(up.data));
+  assert.match(up.data.url, /^\/api\/images\/[\w-]{20,}$/);
+  // A photo larger than the 1 MB default body limit is accepted on this route.
+  const big = Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]), Buffer.alloc(1100 * 1024, 1)]);
+  assert.equal((await a('POST', '/api/uploads/image', { purpose: 'report', data: dataUrl(big) })).status, 200);
+
+  assert.equal((await a('POST', `/api/tasks/${task.id}/attachments`, { images: [{ url: '/api/images/made-up', public_id: 'x' }] })).status, 400);
+  const att = await a('POST', `/api/tasks/${task.id}/attachments`, { images: [up.data], caption: 'Before' });
+  assert.equal(att.status, 200, JSON.stringify(att.data));
+  const shown = (await a('GET', `/api/tasks/${task.id}`)).data.attachments;
+  assert.equal(shown[0].url, up.data.url);
+
+  // Served to the company only; the thumbnail separately.
+  const cookieOf = async (email) => {
+    const res = await fetch(`${base}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: 'secret123' }) });
+    return res.headers.get('set-cookie').split(';')[0];
+  };
+  const mine = await cookieOf('o@pix.co');
+  const full = await fetch(base + up.data.url, { headers: { Cookie: mine } });
+  assert.equal(full.status, 200);
+  assert.equal(full.headers.get('content-type'), 'image/jpeg');
+  assert.ok(Buffer.from(await full.arrayBuffer()).equals(jpeg));
+  const th = await fetch(`${base}${up.data.url}?size=thumb`, { headers: { Cookie: mine } });
+  assert.ok(Buffer.from(await th.arrayBuffer()).equals(small));
+  assert.equal((await fetch(base + up.data.url, { headers: { Cookie: await cookieOf('admin@delta.co') } })).status, 404);
+  assert.equal((await fetch(base + up.data.url)).status, 401);
+
+  // Unattached uploads are cleaned up; attached ones stay until their attachment is deleted.
+  const { purgeOrphanImages } = require('../server/images');
+  assert.equal(await purgeOrphanImages(db, -1000), 1, 'only the never-attached photo');
+  assert.equal((await a('DELETE', `/api/attachments/${shown[0].id}`)).status, 200);
+  assert.equal((await fetch(base + up.data.url, { headers: { Cookie: mine } })).status, 404);
+});

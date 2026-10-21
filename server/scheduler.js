@@ -4,6 +4,7 @@
 
 const { getUser, notify } = require('./access');
 const { runSubscriptionReminders } = require('./subscription');
+const { purgeOrphanImages } = require('./images');
 
 const DUE_REMINDERS = `
   SELECT * FROM tasks
@@ -53,6 +54,7 @@ function startScheduler(db, { intervalMs = 30000, messenger = null } = {}) {
       if (Date.now() - lastSubscriptionCheck > 3600 * 1000) {
         lastSubscriptionCheck = Date.now();
         await runSubscriptionReminders(db, new Date(), messenger);
+        await purgeOrphanImages(db);
       }
     } catch (err) {
       console.error('scheduler error:', err);

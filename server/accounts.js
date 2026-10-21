@@ -104,6 +104,7 @@ async function deleteCompany(db, companyId) {
     for (const table of ['notifications', 'sessions', 'password_resets', 'project_members']) {
       await tx.run(`DELETE FROM ${table} WHERE user_id IN (${inCompany})`, companyId);
     }
+    await tx.run('DELETE FROM images WHERE company_id = ?', companyId);
     await tx.run('DELETE FROM subscription_events WHERE company_id = ?', companyId);
     await tx.run('UPDATE subscription_events SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE company_id = ?)', companyId);
     await tx.run('UPDATE users SET supervisor_id = NULL WHERE company_id = ?', companyId);

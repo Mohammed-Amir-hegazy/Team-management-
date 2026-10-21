@@ -9,7 +9,7 @@ const {
   purgeTasks, notify, personalProject,
 } = require('../access');
 const { sendRequirements } = require('../requirements');
-const { validateImages } = require('../cloudinary');
+const { validateImages } = require('../images');
 
 const TASK_LIST_SQL = `
   SELECT t.*, u.name AS assignee_name, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name,
@@ -245,11 +245,11 @@ module.exports = function register(router) {
 
   // ---- Supporting images ---------------------------------------------------
 
-  // Images already uploaded to Cloudinary by the browser; we record and validate them.
+  // Images already uploaded by the browser (to Cloudinary or to us); we record and validate them.
   router.post('/api/tasks/:id/attachments', async ({ db, user, params, body, config }) => {
     const { task } = await loadTask(db, user, v.id(params.id, 'المهمة'));
     if (!(await canUpdateTaskStatus(db, user, task))) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');
-    const images = validateImages(config, body.images);
+    const images = await validateImages(db, config, user, body.images);
     const caption = v.text(body.caption, 'الوصف', { required: false, max: 300 });
     const ts = now();
     await db.transaction(async (tx) => {
