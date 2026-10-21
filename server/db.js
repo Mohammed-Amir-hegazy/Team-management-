@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT NOT NULL CHECK (role IN ('owner', 'manager', 'team_leader', 'employee')),
   supervisor_id INTEGER REFERENCES users(id),
   job_title     TEXT NOT NULL DEFAULT '',
+  phone         TEXT NOT NULL DEFAULT '',
   roles         TEXT NOT NULL DEFAULT '',
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL
@@ -28,6 +29,8 @@ CREATE TABLE IF NOT EXISTS projects (
   description TEXT NOT NULL DEFAULT '',
   status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'on_hold', 'completed')),
   created_by  INTEGER NOT NULL REFERENCES users(id),
+  -- Set on a person's hidden project that holds their standalone tasks (tasks outside any project).
+  personal_owner_id INTEGER REFERENCES users(id),
   created_at  TEXT NOT NULL
 );
 
@@ -114,6 +117,31 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at        TEXT NOT NULL
 );
 
+-- Images (hosted on Cloudinary) supporting a task's execution, or attached directly to a report.
+CREATE TABLE IF NOT EXISTS attachments (
+  id          INTEGER PRIMARY KEY,
+  task_id     INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+  report_id   INTEGER REFERENCES reports(id) ON DELETE CASCADE,
+  uploaded_by INTEGER NOT NULL REFERENCES users(id),
+  url         TEXT NOT NULL,
+  public_id   TEXT NOT NULL,
+  width       INTEGER,
+  height      INTEGER,
+  caption     TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL
+);
+
+-- One pending password-reset code per user (stored hashed).
+CREATE TABLE IF NOT EXISTS password_resets (
+  user_id      INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  code_hash    TEXT NOT NULL,
+  expires_at   TEXT NOT NULL,
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  sent_at      TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  window_count INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id         INTEGER PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -134,6 +162,8 @@ CREATE INDEX IF NOT EXISTS idx_requirements_task ON requirements(task_id);
 CREATE INDEX IF NOT EXISTS idx_requests_recipient ON requests(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_reports_recipient ON reports(recipient_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_attachments_task ON attachments(task_id);
+CREATE INDEX IF NOT EXISTS idx_attachments_report ON attachments(report_id);
 `;
 
 // Small promise-based query API shared by the database and by open transactions,
@@ -198,6 +228,8 @@ const ADDED_COLUMNS = [
   ['users', 'job_title', "TEXT NOT NULL DEFAULT ''"],
   ['users', 'roles', "TEXT NOT NULL DEFAULT ''"],
   ['reports', 'snapshot', 'TEXT'],
+  ['users', 'phone', "TEXT NOT NULL DEFAULT ''"],
+  ['projects', 'personal_owner_id', 'INTEGER REFERENCES users(id)'],
 ];
 
 async function migrate(db) {
@@ -208,6 +240,8 @@ async function migrate(db) {
     }
   }
   await db.run("UPDATE users SET roles = role WHERE roles = ''");
+  // Indexes on columns that older databases only gain in the loop above.
+  await db.run('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_personal ON projects(personal_owner_id) WHERE personal_owner_id IS NOT NULL');
 }
 
 function now() {

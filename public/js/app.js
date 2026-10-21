@@ -2,7 +2,7 @@
 
 import {
   state, $, $$, esc, icon, mark, api, toast, openModal, formData, avatar, loader, setFab,
-  ROLE_LABELS, fmtLongDate,
+  ROLE_LABELS, busy,
 } from './core.js';
 import { viewDashboard } from './views/dashboard.js';
 import { viewProjects, viewProject } from './views/projects.js';
@@ -13,7 +13,7 @@ import { viewTeam } from './views/team.js';
 import { viewPeople } from './views/people.js';
 import { viewNotifications } from './views/notifications.js';
 
-const ALARM_TYPES = new Set(['reminder', 'overdue']);
+const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge']);
 
 // ---------------------------------------------------------------------------
 // Boot & authentication
@@ -21,6 +21,9 @@ const ALARM_TYPES = new Set(['reminder', 'overdue']);
 
 async function boot() {
   const minSplash = new Promise((r) => setTimeout(r, 900));
+  try {
+    state.config = await api('GET', '/api/client-config');
+  } catch { /* defaults: optional features hidden */ }
   try {
     const { user } = await api('GET', '/api/me');
     state.me = user;
@@ -31,6 +34,20 @@ async function boot() {
     await showAuth();
   }
   $('#splash').classList.add('gone');
+}
+
+const passwordField = (id, name, autocomplete, label = 'كلمة المرور') => `
+  <div class="field"><label for="${id}">${label}</label>
+    <div class="input-icon">${icon('key')}<input id="${id}" name="${name}" type="password" required dir="ltr" autocomplete="${autocomplete}">
+      <button type="button" class="toggle-pass" aria-label="إظهار كلمة المرور">${icon('eye')}</button></div></div>`;
+
+function bindPasswordToggles(root) {
+  root.querySelectorAll('.toggle-pass').forEach((btn) => btn.addEventListener('click', () => {
+    const input = btn.parentElement.querySelector('input');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.innerHTML = icon(show ? 'eyeOff' : 'eye');
+  }));
 }
 
 async function showAuth() {
@@ -45,62 +62,135 @@ async function showAuth() {
     toast(err.message, { error: true });
   }
   el.innerHTML = `
-    <section class="auth-brand">
-      <span class="blob a"></span><span class="blob b"></span>
-      <div>
-        <div class="auth-logo"><img src="/brand/wordmark-white.svg" alt="EBTIKAR">${mark('animate')}</div>
-        <h2>منصة ابتكار لإدارة الأعمال</h2>
-        <p>مشاريعك ومهامك وتقارير فريقك في مكان واحد، بتسلسل إداري واضح ومتابعة لحظية لحالة العمل.</p>
-        <ul class="auth-points">
-          <li><span class="dot">${icon('layers')}</span>مشاريع ومهام بمواعيد نهائية وتنبيهات</li>
-          <li><span class="dot">${icon('report')}</span>تقارير ترفع حالة العمل كاملة بضغطة زر</li>
-          <li><span class="dot">${icon('shield')}</span>تسلسل إداري يحترم الصلاحيات</li>
-        </ul>
-      </div>
-      <div class="small" style="color:#8D8AC9">© ${new Date().getFullYear()} Ebtikar Software Solutions</div>
-    </section>
-    <section class="auth-form">
-      <div class="card">
-        <h1>${needsSetup ? 'إعداد النظام' : 'تسجيل الدخول'}</h1>
-        <p class="muted">${needsSetup ? 'أنشئ حساب صاحب الشركة للبدء في استخدام المنصة.' : 'مرحبًا بعودتك، يُرجى إدخال بيانات حسابك.'}</p>
-        <form id="auth-form" novalidate>
-          ${needsSetup ? `
-            <div class="field"><label for="f-name">الاسم الكامل</label><input id="f-name" name="name" required autocomplete="name"></div>
-            <div class="field"><label for="f-title">المسمى الوظيفي <span class="hint">(اختياري)</span></label><input id="f-title" name="job_title" placeholder="مثال: المدير التنفيذي"></div>` : ''}
-          <div class="field"><label for="f-email">البريد الإلكتروني</label>
-            <div class="input-icon">${icon('user')}<input id="f-email" name="email" type="email" required autocomplete="username" dir="ltr"></div></div>
-          <div class="field"><label for="f-pass">كلمة المرور</label>
-            <div class="input-icon">${icon('key')}<input id="f-pass" name="password" type="password" required dir="ltr"
-              autocomplete="${needsSetup ? 'new-password' : 'current-password'}">
-              <button type="button" class="toggle-pass" aria-label="إظهار كلمة المرور">${icon('eye')}</button></div></div>
-          <div class="form-error" role="alert"></div>
-          <button class="btn lg block" type="submit">${needsSetup ? 'إنشاء الحساب والبدء' : 'دخول'}</button>
-        </form>
-        <div class="auth-copy">${fmtLongDate()}</div>
-      </div>
-    </section>`;
-  $('.toggle-pass', el).addEventListener('click', (e) => {
-    const input = $('#f-pass');
-    const show = input.type === 'password';
-    input.type = show ? 'text' : 'password';
-    e.currentTarget.innerHTML = icon(show ? 'eyeOff' : 'eye');
-  });
+    <span class="blob a"></span><span class="blob b"></span>
+    <div class="auth-card card">
+      <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
+      <h1>${needsSetup ? 'إعداد النظام' : 'تسجيل الدخول'}</h1>
+      ${needsSetup ? '<p class="muted small">يُنشأ هذا الحساب مرة واحدة ليكون حساب صاحب الشركة.</p>' : ''}
+      <form id="auth-form" novalidate>
+        ${needsSetup ? `
+          <div class="field"><label for="f-name">الاسم الكامل</label><input id="f-name" name="name" required autocomplete="name"></div>
+          <div class="fields">
+            <div class="field"><label for="f-title">المسمى الوظيفي</label><input id="f-title" name="job_title" placeholder="مثال: المدير التنفيذي"></div>
+            <div class="field"><label for="f-phone">رقم واتساب</label><input id="f-phone" name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
+          </div>` : ''}
+        <div class="field"><label for="f-email">البريد الإلكتروني</label>
+          <div class="input-icon">${icon('user')}<input id="f-email" name="email" type="email" required autocomplete="username" dir="ltr"></div></div>
+        ${passwordField('f-pass', 'password', needsSetup ? 'new-password' : 'current-password')}
+        ${needsSetup ? '' : '<div class="auth-links"><a href="#" id="forgot">نسيت كلمة المرور؟</a></div>'}
+        <div class="form-error" role="alert"></div>
+        <button class="btn lg block" type="submit">${needsSetup ? 'إنشاء الحساب' : 'دخول'}</button>
+      </form>
+    </div>
+    <div class="auth-copy">© ${new Date().getFullYear()} Ebtikar Software Solutions</div>`;
+  bindPasswordToggles(el);
+  const forgot = $('#forgot', el);
+  if (forgot) forgot.addEventListener('click', (e) => { e.preventDefault(); forgotPassword($('#f-email').value); });
   $('#auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = $('button[type=submit]', e.target);
     btn.disabled = true;
     try {
-      const { user } = await api('POST', needsSetup ? '/api/setup' : '/api/login', formData(e.target));
-      state.me = user;
-      const me = await api('GET', '/api/me');
-      state.me = me.user;
-      showApp();
+      await api('POST', needsSetup ? '/api/setup' : '/api/login', formData(e.target));
+      await enterApp();
     } catch (err) {
       $('.form-error', e.target).textContent = err.message;
     } finally {
       btn.disabled = false;
     }
   });
+}
+
+async function enterApp() {
+  const { user } = await api('GET', '/api/me');
+  state.me = user;
+  showApp();
+}
+
+// Two steps in one sheet: ask for a code (email / SMS / WhatsApp), then set a new password with it.
+function forgotPassword(prefill = '') {
+  const channels = [['email', 'البريد الإلكتروني', 'user'], ['whatsapp', 'واتساب', 'whatsapp'], ['sms', 'رسالة نصية SMS', 'phone']]
+    .filter(([k]) => state.config.otp[k]);
+  const { el, form, close } = openModal({ title: 'استعادة كلمة المرور', footer: false, body: '<div id="fp"></div>' });
+  const box = $('#fp', el);
+  const showError = (msg) => { $('.form-error', form).textContent = msg; };
+  let identifier = prefill;
+  let channel = null;
+  let handler = null;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!handler) return;
+    const btn = $('button[type=submit]', box);
+    if (btn) btn.disabled = true;
+    showError('');
+    try {
+      await handler(formData(form));
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      if (btn && btn.isConnected) btn.disabled = false;
+    }
+  });
+
+  const stepOne = () => {
+    if (!channels.length) {
+      box.innerHTML = `<div class="callout amber">${icon('alert')}<div>استعادة كلمة المرور غير مفعّلة حاليًا. يُرجى التواصل مع مسؤول النظام لإعادة تعيينها.</div></div>`;
+      return;
+    }
+    box.innerHTML = `
+      <p class="muted">أدخل بريدك الإلكتروني أو رقم هاتفك المسجّل، واختر طريقة استلام رمز التحقق.</p>
+      <div class="field"><label>البريد الإلكتروني أو رقم الهاتف</label>
+        <input name="identifier" dir="ltr" required value="${esc(identifier)}" autocomplete="username"></div>
+      <div class="field"><label>طريقة الاستلام</label><div class="checks cols">
+        ${channels.map(([k, label, ic], i) => `<label class="check"><input type="radio" name="channel" value="${k}" ${i === 0 ? 'checked' : ''}>
+          ${icon(ic)}<span class="grow">${label}</span></label>`).join('')}</div></div>
+      <button class="btn block" type="submit">${icon('send')}إرسال رمز التحقق</button>`;
+    handler = async (d) => {
+      identifier = (d.identifier || '').trim();
+      channel = d.channel;
+      const r = await api('POST', '/api/password/forgot', { identifier, channel });
+      stepTwo(r.message);
+    };
+  };
+
+  const stepTwo = (message) => {
+    box.innerHTML = `
+      <div class="callout green">${icon('check')}<div>${esc(message)}</div></div>
+      <div class="field"><label>رمز التحقق</label>
+        <input class="otp" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" dir="ltr" required placeholder="••••••"></div>
+      ${passwordField('fp-new', 'new_password', 'new-password', 'كلمة المرور الجديدة')}
+      ${passwordField('fp-confirm', 'confirm', 'new-password', 'تأكيد كلمة المرور')}
+      <button class="btn block" type="submit">تعيين كلمة المرور والدخول</button>
+      <div class="auth-links" style="justify-content:center;margin-top:.8rem"><button type="button" class="link-btn" id="resend" disabled></button></div>`;
+    bindPasswordToggles(box);
+    form.elements.code.focus();
+    const resend = $('#resend', box);
+    let left = 60;
+    const tick = () => {
+      resend.disabled = left > 0;
+      resend.textContent = left > 0 ? `إعادة الإرسال بعد ${left} ثانية` : 'إعادة إرسال الرمز';
+      if (left-- > 0 && box.isConnected) setTimeout(tick, 1000);
+    };
+    tick();
+    resend.addEventListener('click', async () => {
+      try {
+        await api('POST', '/api/password/forgot', { identifier, channel });
+        toast('تم إرسال رمز جديد');
+        left = 60;
+        tick();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+    handler = async (d) => {
+      if (d.new_password !== d.confirm) throw new Error('كلمتا المرور غير متطابقتين');
+      await api('POST', '/api/password/reset', { identifier, code: d.code, new_password: d.new_password });
+      close();
+      toast('تم تعيين كلمة المرور الجديدة');
+      await enterApp();
+    };
+  };
+  stepOne();
 }
 
 window.addEventListener('session-expired', () => {
@@ -203,6 +293,10 @@ function accountSheet() {
         <div class="item">${icon('user')}<span class="grow">البريد الإلكتروني</span><span class="muted" dir="ltr">${esc(me.email)}</span></div>
         <div class="item">${icon('users')}<span class="grow">المسؤول المباشر</span><span class="muted">${esc(me.supervisor_name || '—')}</span></div>
       </div>
+      <h3>رقم واتساب</h3>
+      <div class="inline-form" style="margin-bottom:1.2rem">
+        <div class="field"><input name="phone" type="tel" dir="ltr" value="${esc(me.phone ? `+${me.phone}` : '')}" placeholder="2010xxxxxxxx+"></div>
+        <button class="btn subtle" type="button" data-save-phone>حفظ الرقم</button></div>
       <h3>تغيير كلمة المرور</h3>
       <div class="field"><label>كلمة المرور الحالية</label><input type="password" name="current_password" dir="ltr" autocomplete="current-password"></div>
       <div class="field"><label>كلمة المرور الجديدة</label><input type="password" name="new_password" dir="ltr" autocomplete="new-password"></div>
@@ -215,6 +309,11 @@ function accountSheet() {
     footer: false,
   });
   $('[data-logout]', el).addEventListener('click', () => { el.remove(); logout(); });
+  $('[data-save-phone]', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
+    const { user } = await api('PATCH', '/api/me', { phone: $('[name=phone]', el).value });
+    state.me = { ...state.me, phone: user.phone };
+    toast(user.phone ? 'تم حفظ رقم واتساب' : 'تم حذف الرقم');
+  }));
 }
 
 const topbar = $('#topbar');

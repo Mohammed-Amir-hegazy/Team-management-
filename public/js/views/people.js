@@ -2,6 +2,15 @@ import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal,
   ROLE_LABELS, ORG_ROLES, avatar, emptyState,
 } from '../core.js';
+import { openReminder } from '../remind.js';
+import { openWhatsApp, generalMessage } from '../whatsapp.js';
+
+// Who I may remind: people below me (down) and my supervisor chain (up).
+function relationTo(u) {
+  if (u.in_my_team) return 'down';
+  if ((state.me.chain || []).some((c) => c.id === u.id)) return 'up';
+  return null;
+}
 
 const ROLE_HINTS = {
   manager: 'يشرف على قادة الفرق ويتابع أعمالهم',
@@ -20,7 +29,11 @@ function personCard(u, admin) {
       <div class="t">${esc(u.job_title || ROLE_LABELS[u.role])}</div>
       <div class="roles">${u.roles.map((r) => `<span class="pill ${r === 'admin' ? 'navy' : 'gray'} plain">${ROLE_LABELS[r]}</span>`).join('')}</div>
     </div>
-    ${admin && u.manageable ? `<button class="icon-btn" data-edit="${u.id}" aria-label="تعديل ${esc(u.name)}">${icon('edit')}</button>` : ''}
+    <div class="row" style="gap:.3rem">
+      ${u.phone && u.id !== state.me.id ? `<button class="icon-btn wa" data-wa="${u.id}" aria-label="مراسلة ${esc(u.name)} عبر واتساب">${icon('whatsapp')}</button>` : ''}
+      ${u.active && relationTo(u) ? `<button class="icon-btn" data-remind="${u.id}" aria-label="تذكير ${esc(u.name)}">${icon('bell')}</button>` : ''}
+      ${admin && u.manageable ? `<button class="icon-btn" data-edit="${u.id}" aria-label="تعديل ${esc(u.name)}">${icon('edit')}</button>` : ''}
+    </div>
   </div>`;
 }
 
@@ -55,7 +68,17 @@ export async function viewPeople() {
       <div id="results" class="hidden stack" style="gap:.5rem"></div>
     </section>`);
 
-  const bindEdit = (root) => $$('[data-edit]', root).forEach((b) => b.addEventListener('click', () => userModal(users, byId.get(Number(b.dataset.edit)))));
+  const bindEdit = (root) => {
+    $$('[data-edit]', root).forEach((b) => b.addEventListener('click', () => userModal(users, byId.get(Number(b.dataset.edit)))));
+    $$('[data-remind]', root).forEach((b) => b.addEventListener('click', () => {
+      const u = byId.get(Number(b.dataset.remind));
+      openReminder({ person: u, relation: relationTo(u) });
+    }));
+    $$('[data-wa]', root).forEach((b) => b.addEventListener('click', () => {
+      const u = byId.get(Number(b.dataset.wa));
+      openWhatsApp(u.phone, generalMessage(u, relationTo(u) || 'up', ''));
+    }));
+  };
   bindEdit(el);
   $('#q', el).addEventListener('input', (e) => {
     const q = e.target.value.trim();
@@ -108,6 +131,9 @@ function userModal(users, user) {
       </div>
       <div class="fields">
         <div class="field"><label>البريد الإلكتروني</label><input name="email" type="email" dir="ltr" required value="${esc(editing ? user.email : '')}"></div>
+        <div class="field"><label>رقم واتساب <span class="hint">(مع رمز الدولة)</span></label><input name="phone" type="tel" dir="ltr" value="${esc(editing && user.phone ? `+${user.phone}` : '')}" placeholder="2010xxxxxxxx+"></div>
+      </div>
+      <div class="fields">
         <div class="field"><label>${editing ? 'كلمة مرور جديدة <span class="hint">(اتركها فارغة للإبقاء على الحالية)</span>' : 'كلمة المرور المبدئية'}</label>
           <input name="password" type="text" dir="ltr" ${editing ? '' : 'required'} autocomplete="new-password"></div>
       </div>
@@ -121,7 +147,7 @@ function userModal(users, user) {
       ${editing && user.id !== state.me.id ? `<label class="switch"><input type="checkbox" name="active" ${user.active ? 'checked' : ''}> الحساب نشط</label>` : ''}`}`,
     submitLabel: editing ? 'حفظ التعديلات' : 'إنشاء الحساب',
     onSubmit: async (d) => {
-      const body = { name: d.name, job_title: d.job_title, email: d.email };
+      const body = { name: d.name, job_title: d.job_title, email: d.email, phone: d.phone };
       if (!isOwner) {
         body.roles = d.roles;
         body.supervisor_id = Number(d.supervisor_id) || null;

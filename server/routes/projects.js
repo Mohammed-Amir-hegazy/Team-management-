@@ -33,7 +33,7 @@ async function projectSummary(db, user, projectId) {
 
 module.exports = function register(router) {
   router.get('/api/projects', async ({ db, user }) => {
-    const ids = (await visibleProjects(db, user)).map((p) => p.id);
+    const ids = (await visibleProjects(db, user)).filter((p) => !p.personal_owner_id).map((p) => p.id);
     return { projects: await projectSummaries(db, user, ids) };
   });
 
@@ -100,7 +100,7 @@ module.exports = function register(router) {
       my_draft_requirements: myDrafts,
       permissions: {
         manage,
-        add_members: manage || (isMember && user.role !== 'employee'),
+        add_members: !project.personal_owner_id && (manage || (isMember && user.role !== 'employee')),
         create_tasks: true,
         send_requests: !!user.supervisor_id,
       },
@@ -129,6 +129,7 @@ module.exports = function register(router) {
   router.post('/api/projects/:id/members', async ({ db, user, params, body }) => {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
     const memberId = v.id(body.user_id, 'العضو');
+    if (project.personal_owner_id) throw new HttpError(400, 'لا يمكن إضافة أعضاء إلى المهام المستقلة');
     const allowed = canManageProject(user, project)
       || ((await isProjectMember(db, project.id, user.id)) && user.role !== 'employee');
     if (!allowed) throw new HttpError(403, 'ليست لديك صلاحية لتنفيذ هذا الإجراء');

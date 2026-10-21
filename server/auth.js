@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { now } = require('./db');
+const { HttpError } = require('./http');
 
 const SESSION_DAYS = 30;
 
@@ -17,6 +18,13 @@ function verifyPassword(password, stored) {
   const expected = Buffer.from(hash, 'hex');
   const actual = crypto.scryptSync(password, salt, expected.length);
   return crypto.timingSafeEqual(expected, actual);
+}
+
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.length < 6) {
+    throw new HttpError(400, 'يجب ألا تقل كلمة المرور عن ستة أحرف');
+  }
+  return password;
 }
 
 async function createSession(db, userId) {
@@ -45,4 +53,4 @@ async function destroySession(db, token) {
   if (token) await db.run('DELETE FROM sessions WHERE token = ?', token);
 }
 
-module.exports = { hashPassword, verifyPassword, createSession, sessionCookie, userFromSession, destroySession };
+module.exports = { hashPassword, verifyPassword, validatePassword, createSession, sessionCookie, userFromSession, destroySession };

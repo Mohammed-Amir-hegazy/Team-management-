@@ -1,4 +1,5 @@
-# Render free web service + Turso free database. Render asks for the two Turso values on first deploy.
+# Render free web service + Turso free database. Render asks for the values marked "sync: false"
+# on first deploy; the optional ones can be left empty and added later in the service's Environment tab.
 services:
   - type: web
     name: team-management
@@ -12,7 +13,26 @@ services:
         value: "22"
       - key: COOKIE_SECURE
         value: "1"
+      - key: DEFAULT_COUNTRY_CODE
+        value: "20"
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
+        sync: false
+      # Optional: image uploads (cloudinary://<api_key>:<api_secret>@<cloud_name>)
+      - key: CLOUDINARY_URL
+        sync: false
+      # Optional: password-reset codes by email (Brevo or Resend) …
+      - key: BREVO_API_KEY
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      # … and by SMS / WhatsApp (Twilio)
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      - key: TWILIO_SMS_FROM
         sync: false

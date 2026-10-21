@@ -7,7 +7,8 @@ const { requireSupervisor, subordinateIds, notify } = require('../access');
 
 // Items always hang off the original request of a forwarding chain: COALESCE(root_id, id).
 const REQUEST_SQL = `
-  SELECT q.*, s.name AS sender_name, r.name AS recipient_name, p.name AS project_name, t.title AS task_title,
+  SELECT q.*, s.name AS sender_name, r.name AS recipient_name, r.phone AS recipient_phone, r.job_title AS recipient_job_title,
+    s.phone AS sender_phone, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, t.title AS task_title,
     (SELECT COUNT(*) FROM requirements x WHERE x.request_id = COALESCE(q.root_id, q.id)) AS items_count
   FROM requests q
   JOIN users s ON s.id = q.sender_id
@@ -65,6 +66,7 @@ module.exports = function register(router) {
       permissions: {
         respond: request.recipient_id === user.id && request.status === 'pending',
         forward: request.recipient_id === user.id && request.status === 'pending' && !!user.supervisor_id,
+        remind: request.sender_id === user.id && request.status === 'pending',
       },
     };
   });
@@ -87,6 +89,21 @@ module.exports = function register(router) {
           `قام ${user.name} ${label} طلبك${note ? `: ${note}` : ''}`, `#/requests/${link.id}`);
       }
     });
+    return { ok: true };
+  });
+
+  // The sender nudges the recipient about a request still waiting for an answer.
+  router.post('/api/requests/:id/remind', async ({ db, user, params, body }) => {
+    const request = await loadRequest(db, user, v.id(params.id, 'الطلب'));
+    if (request.sender_id !== user.id) throw new HttpError(403, 'يمكن لمرسل الطلب فقط التذكير به');
+    if (request.status !== 'pending') throw new HttpError(400, 'تم الرد على هذا الطلب أو إحالته');
+    const message = v.text(body.message, 'نص التذكير', { required: false, max: 1000 });
+    const link = `#/requests/${request.id}`;
+    const recent = await db.get(`SELECT 1 FROM notifications WHERE user_id = ? AND type = 'nudge' AND link = ? AND created_at > ?`,
+      request.recipient_id, link, new Date(Date.now() - 30 * 60 * 1000).toISOString());
+    if (recent) throw new HttpError(429, 'أُرسل تذكير بهذا الطلب قبل قليل؛ يُرجى الانتظار نصف ساعة');
+    await notify(db, request.recipient_id, 'nudge',
+      `🔔 يذكّركم ${user.name} بطلب المتطلبات المرسل بانتظار ردّكم${message ? `: ${message}` : ''}`, link);
     return { ok: true };
   });
 

@@ -5,7 +5,7 @@ const v = require('../validate');
 const { subordinateIds } = require('../access');
 
 const TASK_SQL = `
-  SELECT t.*, p.name AS project_name, u.name AS assignee_name FROM tasks t
+  SELECT t.*, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, u.name AS assignee_name FROM tasks t
   JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id
 `;
 

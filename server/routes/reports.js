@@ -9,12 +9,17 @@ const {
 const {
   TASK_FIELDS, TASK_FROM, placeholders, markOverdue, summarize, memberStats, workSnapshot, EMPTY_STATS,
 } = require('../snapshot');
+const { validateImages } = require('../cloudinary');
+
+function reportImages(db, reportId) {
+  return db.all('SELECT id, url, caption, width, height FROM attachments WHERE report_id = ? ORDER BY id', reportId);
+}
 
 const NOT_ALLOWED = 'ليست لديك صلاحية لتنفيذ هذا الإجراء';
 
 const REPORT_SQL = `
   SELECT r.*, s.name AS sender_name, s.job_title AS sender_job_title, x.name AS recipient_name,
-         p.name AS project_name, t.title AS task_title
+         CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, t.title AS task_title
   FROM reports r
   JOIN users s ON s.id = r.sender_id
   JOIN users x ON x.id = r.recipient_id
@@ -80,7 +85,7 @@ module.exports = function register(router) {
   });
 
   // The recipient is always the sender's direct supervisor: no level can be skipped.
-  router.post('/api/reports', async ({ db, user, body }) => {
+  router.post('/api/reports', async ({ db, user, body, config }) => {
     const supervisor = await requireSupervisor(db, user);
     if (body.recipient_id !== undefined && body.recipient_id !== null && Number(body.recipient_id) !== supervisor.id) {
       throw new HttpError(403, 'تُرسل التقارير إلى المسؤول المباشر فقط');
@@ -93,12 +98,17 @@ module.exports = function register(router) {
     else if (projectId) await loadProject(db, user, projectId);
     const snapshot = body.include_status === false ? null
       : JSON.stringify(await workSnapshot(db, user, { projectId, taskId }));
+    const images = Array.isArray(body.images) && body.images.length ? validateImages(config, body.images) : [];
 
     const id = await db.transaction(async (tx) => {
       const r = await tx.run(`
         INSERT INTO reports (sender_id, recipient_id, title, body, project_id, task_id, snapshot, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, user.id, supervisor.id, title, text, projectId, taskId, snapshot, now());
+      for (const img of images) {
+        await tx.run(`INSERT INTO attachments (report_id, uploaded_by, url, public_id, width, height, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`, r.lastInsertRowid, user.id, img.url, img.public_id, img.width, img.height, now());
+      }
       await notify(tx, supervisor.id, 'report', `تقرير جديد من ${user.name}: «${title}»`, `#/reports/${r.lastInsertRowid}`);
       return r.lastInsertRowid;
     });
@@ -115,8 +125,9 @@ module.exports = function register(router) {
       ? await db.get(`${REPORT_SQL} WHERE r.id = ?`, report.forwarded_from_id) : null;
     const isRecipient = report.recipient_id === user.id;
     return {
-      report: parseSnapshot(report),
-      forwarded_from: parseSnapshot(forwardedFrom),
+      report: { ...parseSnapshot(report), images: await reportImages(db, report.id) },
+      forwarded_from: forwardedFrom
+        ? { ...parseSnapshot(forwardedFrom), images: await reportImages(db, forwardedFrom.id) } : null,
       permissions: {
         reply: isRecipient && !report.reply,
         forward: isRecipient && !!user.supervisor_id,

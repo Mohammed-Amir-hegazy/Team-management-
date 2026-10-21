@@ -5,6 +5,7 @@ import {
 } from '../core.js';
 import { summaryPills } from './reports.js';
 import { buildXlsx, download } from '../xlsx.js';
+import { openReminder } from '../remind.js';
 
 const DAY = 24 * 3600 * 1000;
 
@@ -69,7 +70,7 @@ export async function viewTeam({ query }) {
       <div class="card-head"><h2>أعضاء الفريق</h2><span class="muted small">اضغط على العضو لعرض مهامه</span></div>
       <div class="table-wrap"><table class="data">
         <thead><tr><th>العضو</th><th>توزيع المهام</th><th class="num">قيد التنفيذ</th><th class="num">متوقفة</th>
-          <th class="num">قيد المراجعة</th><th class="num">متأخرة</th><th class="num">أُنجزت في الفترة</th></tr></thead>
+          <th class="num">قيد المراجعة</th><th class="num">متأخرة</th><th class="num">أُنجزت في الفترة</th><th></th></tr></thead>
         <tbody class="stagger">${members.map((m, i) => `<tr class="link" data-href="#/tasks?scope=team&assignee=${m.id}" style="--i:${Math.min(i, 12)}">
           <td><div class="row">${avatar(m.name, m.id, 'sm')}<div><div><strong>${esc(m.name)}</strong></div>
             <div class="muted small">${esc(m.job_title || ROLE_LABELS[m.role])}${m.supervisor_name ? ` · يتبع ${esc(m.supervisor_name)}` : ''}</div></div></div></td>
@@ -78,7 +79,8 @@ export async function viewTeam({ query }) {
           <td class="num ${m.stats.blocked ? 'late' : ''}">${m.stats.blocked}</td>
           <td class="num">${m.stats.review}</td>
           <td class="num ${m.stats.overdue ? 'late' : ''}">${m.stats.overdue}</td>
-          <td class="num">${m.stats.done_in_period}</td></tr>`).join('')}</tbody>
+          <td class="num">${m.stats.done_in_period}</td>
+          <td><button class="icon-btn" data-remind="${m.id}" aria-label="تذكير ${esc(m.name)}">${icon('bell')}</button></td></tr>`).join('')}</tbody>
       </table></div>
     </section>
 
@@ -117,6 +119,10 @@ export async function viewTeam({ query }) {
     if (!from.value || !to.value || from.value > to.value) { toast('يُرجى تحديد فترة صحيحة', { error: true }); return; }
     go('custom', { from: from.value, to: to.value });
   });
+  $$('[data-remind]', el).forEach((b) => b.addEventListener('click', () => {
+    const m = members.find((x) => x.id === Number(b.dataset.remind));
+    openReminder({ person: m, relation: 'down' });
+  }));
   $('#pdf', el).addEventListener('click', (e) => busy(e.currentTarget, () => printReport(data)));
   $('#xlsx', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
     download(teamWorkbook(data), `Ebtikar-Team-Report-${isoDay(new Date())}.xlsx`);

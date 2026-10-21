@@ -121,8 +121,23 @@ async function canSeeProject(db, user, project) {
   return !!(await db.get(`${VISIBLE_PROJECTS_SQL} AND p.id = ?`, user.id, user.id, project.id));
 }
 
+// A person's standalone-tasks container is never edited, renamed or deleted directly.
 function canManageProject(user, project) {
+  if (project.personal_owner_id) return false;
   return user.role === 'owner' || project.created_by === user.id;
+}
+
+// The hidden project that holds a person's standalone tasks, created on first use.
+async function personalProject(db, owner) {
+  const existing = await db.get('SELECT * FROM projects WHERE personal_owner_id = ?', owner.id);
+  if (existing) return existing;
+  await db.run(`
+    INSERT OR IGNORE INTO projects (name, description, created_by, personal_owner_id, created_at)
+    VALUES (?, '', ?, ?, ?)
+  `, `مهام مستقلة — ${owner.name}`, owner.id, owner.id, now());
+  const project = await db.get('SELECT * FROM projects WHERE personal_owner_id = ?', owner.id);
+  await addProjectMember(db, project.id, owner.id);
+  return project;
 }
 
 async function isProjectMember(db, projectId, userId) {
@@ -165,6 +180,7 @@ async function canUpdateTaskStatus(db, user, task) {
 async function purgeTasks(db, taskIdsSql, ...args) {
   const inTasks = `IN (${taskIdsSql})`;
   await db.run(`UPDATE reports SET task_id = NULL WHERE task_id ${inTasks}`, ...args);
+  await db.run(`DELETE FROM attachments WHERE task_id ${inTasks}`, ...args);
   await db.run(`DELETE FROM requirements WHERE task_id ${inTasks}`, ...args);
   await db.run(`DELETE FROM task_status_history WHERE task_id ${inTasks}`, ...args);
   await purgeRequests(db, `SELECT id FROM requests WHERE task_id ${inTasks}`, ...args);
@@ -203,6 +219,7 @@ function publicUser(user) {
     name: user.name,
     email: user.email,
     job_title: user.job_title || '',
+    phone: user.phone || '',
     role: user.role,
     role_label: ROLE_LABELS[user.role],
     roles,
@@ -235,6 +252,7 @@ module.exports = {
   visibleProjects,
   canSeeProject,
   canManageProject,
+  personalProject,
   isProjectMember,
   addProjectMember,
   loadProject,

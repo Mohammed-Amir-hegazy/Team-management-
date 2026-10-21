@@ -2,6 +2,7 @@ import {
   state, $, esc, icon, api, render, setTitle, setFab, toast, openModal,
   REQUEST_STATUS, pill, avatar, tabs, onTabs, remember, relTime, fmtDateTime, emptyState, plural, ITEMS_N,
 } from '../core.js';
+import { openReminder } from '../remind.js';
 
 export async function viewRequests({ query }) {
   setTitle('الطلبات');
@@ -55,6 +56,7 @@ export async function viewRequest({ id }) {
         ${can.respond ? `<button class="btn success" id="approve">${icon('check')}موافقة</button>
           <button class="btn danger" id="reject">${icon('x')}رفض</button>` : ''}
         ${can.forward ? `<button class="btn ghost" id="forward">${icon('forward')}إحالة إلى ${esc(state.me.supervisor_name)}</button>` : ''}
+        ${can.remind ? `<button class="btn subtle" id="remind">${icon('bell')}تذكير ${esc(q.recipient_name.split(' ')[0])}</button>` : ''}
       </div>
     </div>
     <div class="grid side">
@@ -94,6 +96,11 @@ export async function viewRequest({ id }) {
     $('#approve', el).addEventListener('click', () => respond('approved'));
     $('#reject', el).addEventListener('click', () => respond('rejected'));
   }
+  if (can.remind) $('#remind', el).addEventListener('click', () => openReminder({
+    person: { id: q.recipient_id, name: q.recipient_name, phone: q.recipient_phone, job_title: q.recipient_job_title },
+    relation: 'up',
+    request: { ...q, items_count: items.length },
+  }));
   if (can.forward) $('#forward', el).addEventListener('click', () => openModal({
     title: `إحالة الطلب إلى ${state.me.supervisor_name}`,
     body: '<div class="field"><label>ملاحظة <span class="hint">(اختياري)</span></label><textarea name="note"></textarea></div>',

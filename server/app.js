@@ -3,19 +3,29 @@
 const path = require('node:path');
 const { Router, HttpError, readJson, parseCookies, sendJson, serveStatic } = require('./http');
 const { userFromSession } = require('./auth');
+const { loadConfig } = require('./config');
+const { createMessenger } = require('./messaging');
 
 const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
-function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}) {
+function createApp(db, {
+  publicDir = path.join(__dirname, '..', 'public'),
+  config = loadConfig(),
+  messenger = createMessenger(),
+} = {}) {
   const router = new Router();
   // For uptime checks and keep-awake pings: never touches the database.
   router.get('/api/health', () => ({ ok: true }), { public: true });
+  // Which optional integrations are switched on, so the interface only offers what works.
+  router.get('/api/client-config', () => ({ otp: messenger.channels, uploads: !!config.cloudinary }), { public: true });
   require('./routes/users')(router);
   require('./routes/projects')(router);
   require('./routes/tasks')(router);
   require('./routes/requests')(router);
   require('./routes/reports')(router);
   require('./routes/notifications')(router);
+  require('./routes/password')(router);
+  require('./routes/uploads')(router);
 
   return async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
@@ -33,7 +43,7 @@ function createApp(db, { publicDir = path.join(__dirname, '..', 'public') } = {}
       const found = router.match(req.method, url.pathname);
       if (!found) throw new HttpError(404, 'المسار المطلوب غير موجود');
       const ctx = {
-        req, res, db,
+        req, res, db, config, messenger,
         params: found.params,
         query: url.searchParams,
         cookies: parseCookies(req),

@@ -1,6 +1,6 @@
 // Shared state, formatting, API access and UI building blocks.
 
-export const state = { me: null, lastNotificationId: 0, pollTimer: null, counts: {} };
+export const state = { me: null, config: { otp: {}, uploads: false }, lastNotificationId: 0, pollTimer: null, counts: {} };
 
 export const ROLE_LABELS = {
   owner: 'صاحب الشركة', admin: 'مسؤول النظام', manager: 'مدير', team_leader: 'قائد فريق', employee: 'موظف',
@@ -67,6 +67,9 @@ const ICONS = {
   layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
   shield: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
   inbox: '<path d="M3 13h5l1.5 3h5L16 13h5"/><path d="M5 5h14l2 8v6H3v-6z"/>',
+  whatsapp: '<path d="M3.5 20.5 4.9 16A8.5 8.5 0 1 1 8 19.1z"/><path d="M9.2 8.6c-.2 2.9 3.2 6.3 6.2 6.2l.9-1.4-1.9-1-.9.7a4.6 4.6 0 0 1-2.6-2.6l.7-.9-1-1.9z"/>',
+  camera: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
 };
 
 export function icon(name, cls = '') {

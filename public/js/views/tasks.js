@@ -5,19 +5,17 @@ import {
   toLocalInput, fromLocalInput, plural, ITEMS_N, formData,
 } from '../core.js';
 import { composeReport } from './reports.js';
+import { gallery, bindGallery, photoUploadModal } from '../uploads.js';
+import { openReminder } from '../remind.js';
 
 // ---------------------------------------------------------------------------
 // Create / edit
 // ---------------------------------------------------------------------------
 
 export async function taskFormModal({ projectId = null, task = null, assignable = null }) {
-  let projects = [];
+  let projects = null;
   if (!task && !projectId) {
     projects = (await api('GET', '/api/projects')).projects.filter((p) => p.status !== 'completed');
-    if (!projects.length) {
-      toast('لا توجد مشاريع متاحة لك حاليًا لإضافة مهمة إليها', { error: true });
-      return;
-    }
   }
   if (!assignable) {
     const { users } = await api('GET', '/api/users');
@@ -28,8 +26,10 @@ export async function taskFormModal({ projectId = null, task = null, assignable 
     title: task ? 'تعديل المهمة' : 'مهمة جديدة',
     body: `
       <div class="field"><label>عنوان المهمة</label><input name="title" value="${esc(t.title)}" required placeholder="مثال: تصميم الصفحة الرئيسية"></div>
-      ${projects.length ? `<div class="field"><label>المشروع</label><select name="project_id">
-        ${projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></div>` : ''}
+      ${projects ? `<div class="field"><label>المشروع</label><select name="project_id">
+        <option value="">بدون مشروع — مهمة مستقلة</option>
+        ${projects.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>
+        <span class="hint">المهام المستقلة لا تندرج تحت مشروع، ويطّلع عليها مسؤولوك.</span></div>` : ''}
       <div class="field"><label>الوصف <span class="hint">(اختياري)</span></label><textarea name="description" placeholder="تفاصيل المهمة ومخرجاتها المتوقعة">${esc(t.description)}</textarea></div>
       <div class="fields">
         <div class="field"><label>المسؤول عن التنفيذ</label><select name="assignee_id">
@@ -62,7 +62,8 @@ export async function taskFormModal({ projectId = null, task = null, assignable 
         toast('تم حفظ التعديلات');
         window.dispatchEvent(new Event('refresh-view'));
       } else {
-        const r = await api('POST', `/api/projects/${projectId || d.project_id}/tasks`, body);
+        const target = projectId || d.project_id;
+        const r = await api('POST', target ? `/api/projects/${target}/tasks` : '/api/tasks', body);
         toast('تم إنشاء المهمة');
         location.hash = `#/tasks/${r.task.id}`;
       }
@@ -162,13 +163,16 @@ export async function viewTask({ id }) {
   const el = render(`
     <div class="page-head">
       <div class="titles">
-        <a class="crumb" href="#/projects/${data.project.id}">${icon('back')}${esc(data.project.name)}</a>
+        ${data.project.standalone
+          ? `<a class="crumb" href="#/tasks">${icon('back')}مهمة مستقلة</a>`
+          : `<a class="crumb" href="#/projects/${data.project.id}">${icon('back')}${esc(data.project.name)}</a>`}
         <h1>${esc(t.title)}</h1>
         <div class="row wrap" style="margin-top:.4rem;gap:.4rem">${statusPill(t.status)}
           <span class="pill plain ${t.priority === 'high' ? 'red' : t.priority === 'medium' ? 'amber' : 'gray'}">${icon('flag')} أولوية ${PRIORITY_LABELS[t.priority]}</span>
           ${dl.late ? `<span class="pill red plain">${icon('clock')} متأخرة</span>` : ''}</div>
       </div>
       <div class="actions">
+        ${can.remind ? `<button class="btn subtle" id="remind-task">${icon('bell')}تذكير ${esc(t.assignee_name.split(' ')[0])}</button>` : ''}
         ${me.supervisor_id ? `<button class="btn ghost" id="task-report">${icon('send')}تقرير عن المهمة</button>` : ''}
         ${can.edit ? `<button class="btn ghost" id="edit-task">${icon('edit')}تعديل</button>
           <button class="btn ghost" id="delete-task" aria-label="حذف المهمة">${icon('trash')}</button>` : ''}
@@ -190,6 +194,15 @@ export async function viewTask({ id }) {
             <div class="form-error" role="alert"></div>
             <button class="btn" type="submit">${icon('check')}تحديث الحالة</button>
           </form>` : '<p class="muted">يمكن للمسؤول عن المهمة أو من يعلوه تحديث حالتها.</p>'}
+        </section>
+
+        <section class="card">
+          <div class="card-head"><h2>صور داعمة للتنفيذ</h2><span class="muted small">${data.attachments.length || ''}</span>
+            <div class="actions">${can.upload && state.config.uploads ? `<button class="btn sm subtle" id="add-photos">${icon('camera')}إضافة صور</button>` : ''}</div></div>
+          ${data.attachments.length ? gallery(data.attachments, { deletable: true })
+            : `<div class="upload-zone">${can.upload && state.config.uploads
+              ? 'أضف صورًا توثّق سير العمل؛ ستُرفق تلقائيًا بتقاريرك عن هذه المهمة.'
+              : state.config.uploads ? 'لا توجد صور مرفقة بعد.' : 'رفع الصور غير مفعّل حاليًا.'}</div>`}
         </section>
 
         <section class="card">
@@ -242,6 +255,28 @@ export async function viewTask({ id }) {
         ${t.description ? `<section class="card"><div class="card-head"><h3>الوصف</h3></div><div class="pre">${esc(t.description)}</div></section>` : ''}
       </aside>
     </div>`);
+
+  bindGallery(el);
+  const addPhotos = $('#add-photos', el);
+  if (addPhotos) addPhotos.addEventListener('click', () => photoUploadModal({
+    signParams: { purpose: 'task', task_id: t.id },
+    onDone: async (images, caption) => {
+      await api('POST', `/api/tasks/${t.id}/attachments`, { images, caption });
+      toast(images.length === 1 ? 'تمت إضافة الصورة' : `تمت إضافة ${images.length} صور`);
+      viewTask({ id });
+    },
+  }));
+  $$('[data-del-img]', el).forEach((b) => b.addEventListener('click', () => confirmDialog('هل تريد حذف هذه الصورة؟', async () => {
+    await api('DELETE', `/api/attachments/${b.dataset.delImg}`);
+    toast('تم حذف الصورة');
+    viewTask({ id });
+  }, 'حذف')));
+  const remind = $('#remind-task', el);
+  if (remind) remind.addEventListener('click', () => openReminder({
+    person: { id: t.assignee_id, name: t.assignee_name, phone: t.assignee_phone, job_title: t.assignee_job_title },
+    relation: 'down',
+    task: t,
+  }));
 
   const report = $('#task-report', el);
   if (report) report.addEventListener('click', () => composeReport({ task_id: t.id, label: `المهمة: ${t.title}` }));

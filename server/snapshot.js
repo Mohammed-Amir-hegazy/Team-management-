@@ -7,7 +7,7 @@ const { subordinateIds } = require('./access');
 
 const TASK_FIELDS = `
   t.id, t.title, t.status, t.status_note, t.priority, t.deadline, t.updated_at, t.assignee_id,
-  p.name AS project_name, u.name AS assignee_name
+  CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, u.name AS assignee_name
 `;
 const TASK_FROM = 'FROM tasks t JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id';
 
@@ -71,6 +71,19 @@ async function workSnapshot(db, user, { projectId = null, taskId = null } = {}) 
   }
   tasks = markOverdue(tasks, ts);
 
+  // Supporting images for the tasks in scope (the latest few per task).
+  const images = new Map();
+  if (tasks.length) {
+    const rows = await db.all(`
+      SELECT task_id, url, caption FROM attachments
+      WHERE task_id IN (${placeholders(tasks)}) ORDER BY created_at DESC
+    `, ...tasks.map((t) => t.id));
+    for (const r of rows) {
+      if (!images.has(r.task_id)) images.set(r.task_id, []);
+      if (images.get(r.task_id).length < 6) images.get(r.task_id).push({ url: r.url, caption: r.caption });
+    }
+  }
+
   let team = [];
   if (!taskId) {
     const ids = [...(await subordinateIds(db, user.id))];
@@ -87,7 +100,7 @@ async function workSnapshot(db, user, { projectId = null, taskId = null } = {}) 
     generated_at: ts,
     scope: taskId ? 'task' : projectId ? 'project' : 'all',
     summary: summarize(tasks),
-    tasks: tasks.map(({ assignee_id: _a, assignee_name: _n, ...t }) => t),
+    tasks: tasks.map(({ assignee_id: _a, assignee_name: _n, ...t }) => ({ ...t, images: images.get(t.id) || [] })),
     team,
   };
 }
