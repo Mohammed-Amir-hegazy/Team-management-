@@ -912,3 +912,8 @@ input[type="checkbox"] { width: auto; accent-color: var(--primary); }
 .item.account.off { opacity: .6; }
 .item.account .email { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .item.account .account-actions { width: 100%; justify-content: flex-end; } }
+
+.danger-zone { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-top: 1.4rem; padding: .9rem 1rem;
+  border: 1.5px solid color-mix(in srgb, var(--danger) 35%, var(--border)); border-radius: 16px; background: var(--danger-soft); }
+.btn.danger-text { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+.btn.danger-text:hover { background: var(--danger); color: #fff; }

@@ -8,6 +8,7 @@ const {
   ROLES, roleRank, userRoles, isAdmin, primaryRole, getUser, subordinateIds, ancestorIds, publicUser, notify,
 } = require('../access');
 const { normalizePhone } = require('../phone');
+const { assertDeletable, deleteAccount, deleteCompany } = require('../accounts');
 const {
   accessOf, activeSeats, assertSeatAvailable, createCompany, platformAdmins, PLAN_LABELS,
 } = require('../subscription');
@@ -176,6 +177,23 @@ module.exports = function register(router) {
     return { user: await withSupervisorName(db, await getUser(db, user.id)) };
   }, { ungated: true });
 
+  // Anyone may delete their own account. A company owner who is alone in the company deletes the company with it.
+  router.delete('/api/me', async ({ db, user, body, res }) => {
+    if (!auth.verifyPassword(String(body.password || ''), user.password_hash)) {
+      throw new HttpError(400, 'كلمة المرور غير صحيحة');
+    }
+    await assertDeletable(db, user, { allowSoleOwner: true });
+    let deleted = 'account';
+    if (user.role === 'owner') {
+      await deleteCompany(db, user.company_id);
+      deleted = 'company';
+    } else {
+      await deleteAccount(db, user, user);
+    }
+    res.setHeader('Set-Cookie', auth.sessionCookie(null));
+    return { deleted };
+  }, { ungated: true });
+
   // An in-app reminder (it rings like an alarm) to someone in my chain or my team.
   router.post('/api/users/:id/remind', async ({ db, user, params, body }) => {
     const target = await getUser(db, v.id(params.id, 'المستخدم'));
@@ -203,7 +221,7 @@ module.exports = function register(router) {
   router.get('/api/users', async ({ db, user }) => {
     const admin = isAdmin(user);
     const subs = await subordinateIds(db, user.id);
-    const all = await db.all('SELECT * FROM users WHERE company_id = ?', user.company_id);
+    const all = await db.all('SELECT * FROM users WHERE company_id = ? AND deleted_at IS NULL', user.company_id);
     let visible = all;
     if (!admin && user.role !== 'owner') {
       const ids = new Set([user.id, ...(await ancestorIds(db, user.id)), ...subs]);

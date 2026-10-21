@@ -350,7 +350,10 @@ function accountSheet() {
       <div class="field"><label>كلمة المرور الحالية</label><input type="password" name="current_password" dir="ltr" autocomplete="current-password"></div>
       <div class="field"><label>كلمة المرور الجديدة</label><input type="password" name="new_password" dir="ltr" autocomplete="new-password"></div>
       <div class="row" style="gap:.5rem"><button class="btn" type="submit">حفظ كلمة المرور</button>
-        <button class="btn ghost" type="button" data-logout>${icon('logout')}تسجيل الخروج</button></div>`,
+        <button class="btn ghost" type="button" data-logout>${icon('logout')}تسجيل الخروج</button></div>
+      <div class="danger-zone">
+        <div class="grow"><strong>حذف الحساب</strong><div class="muted small">إجراء نهائي لا يمكن التراجع عنه.</div></div>
+        <button class="btn ghost danger-text" type="button" data-delete-account>${icon('trash')}حذف حسابي</button></div>`,
     onSubmit: async (d) => {
       await api('POST', '/api/me/password', d);
       toast('تم تغيير كلمة المرور بنجاح');
@@ -358,11 +361,38 @@ function accountSheet() {
     footer: false,
   });
   $('[data-logout]', el).addEventListener('click', () => { el.remove(); logout(); });
+  $('[data-delete-account]', el).addEventListener('click', () => { el.remove(); deleteMyAccount(); });
   $('[data-save-phone]', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
     const { user } = await api('PATCH', '/api/me', { phone: $('[name=phone]', el).value });
     state.me = { ...state.me, phone: user.phone };
     toast(user.phone ? 'تم حفظ رقم واتساب' : 'تم حذف الرقم');
   }));
+}
+
+// Explains exactly what happens (it depends on the person's place), then asks for the password.
+function deleteMyAccount() {
+  const me = state.me;
+  const owner = me.role === 'owner';
+  const what = owner
+    ? `بصفتك صاحب الشركة، سيؤدي حذف حسابك إلى <strong>حذف شركة «${esc(me.company.name)}» بالكامل</strong> مع جميع مشاريعها ومهامها وتقاريرها. لا يمكن ذلك إلا إذا لم يبقَ في الشركة أي حساب آخر.`
+    : `سيُحذف حسابك وبياناتك الشخصية نهائيًا، وتنتقل مهامك المفتوحة وفريقك وطلباتك المعلّقة إلى ${me.supervisor_name ? `<strong>${esc(me.supervisor_name)}</strong>` : 'مسؤولك المباشر'}. تبقى التقارير والسجلات السابقة محفوظة باسم «حساب محذوف».`;
+  openModal({
+    title: owner ? 'حذف الحساب والشركة' : 'حذف حسابي',
+    danger: true,
+    submitLabel: 'حذف نهائي',
+    body: `<div class="callout red">${icon('alert')}<div>${what}</div></div>
+      <div class="field"><label>كلمة المرور للتأكيد</label><input type="password" name="password" dir="ltr" required autocomplete="current-password"></div>
+      <label class="check"><input type="checkbox" name="understood"><span class="grow">أفهم أن هذا الإجراء نهائي ولا يمكن التراجع عنه</span></label>`,
+    onSubmit: async (d) => {
+      if (!d.understood) throw new Error('يُرجى تأكيد أنك تفهم أن الحذف نهائي');
+      const r = await api('DELETE', '/api/me', { password: d.password });
+      state.me = null;
+      stopPolling();
+      toast(r.deleted === 'company' ? 'تم حذف الشركة وحسابك نهائيًا' : 'تم حذف حسابك نهائيًا');
+      location.hash = '';
+      showAuth();
+    },
+  });
 }
 
 const topbar = $('#topbar');

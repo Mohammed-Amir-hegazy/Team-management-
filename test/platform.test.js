@@ -203,3 +203,73 @@ test('older single-company databases are migrated into a company', async () => {
   assert.equal((await migrated.get('SELECT company_id FROM projects')).company_id, company.id);
   migrated.close();
 });
+
+test('people delete their own account; work and team move up', async () => {
+  const owner = client();
+  await owner('POST', '/api/signup', { company_name: 'Gamma', name: 'Gamma Owner', email: 'owner@gamma.co', password: 'secret123' });
+  const me = (await owner('GET', '/api/me')).data.user;
+  const add = async (body) => (await owner('POST', '/api/users', { password: 'secret123', ...body })).data.user;
+  const lead = await add({ name: 'Lead', email: 'lead@gamma.co', roles: ['team_leader'], supervisor_id: me.id });
+  const emp = await add({ name: 'Emp', email: 'emp@gamma.co', roles: ['employee'], supervisor_id: lead.id, phone: '01077777777' });
+  const leadC = client();
+  await leadC('POST', '/api/login', { email: 'lead@gamma.co', password: 'secret123' });
+  const own = (await leadC('POST', '/api/tasks', { title: 'Lead standalone' })).data.task;
+  const p = (await leadC('POST', '/api/projects', { name: 'GP', member_ids: [emp.id] })).data.project;
+  const done = (await leadC('POST', `/api/projects/${p.id}/tasks`, { title: 'Finished' })).data.task;
+  await leadC('POST', `/api/tasks/${done.id}/status`, { status: 'done' });
+  const empC = client();
+  await empC('POST', '/api/login', { email: 'emp@gamma.co', password: 'secret123' });
+  await empC('POST', '/api/reports', { title: 'Emp report', body: 'x' });
+
+  assert.equal((await leadC('DELETE', '/api/me', { password: 'wrong' })).status, 400);
+  const r = await leadC('DELETE', '/api/me', { password: 'secret123' });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.deleted, 'account');
+  assert.equal((await leadC('GET', '/api/me')).status, 401);
+  assert.equal((await client()('POST', '/api/login', { email: 'lead@gamma.co', password: 'secret123' })).status, 401);
+
+  // The employee now reports to the owner; the open standalone task moved to the owner's standalone tasks.
+  const empMe = (await empC('GET', '/api/me')).data.user;
+  assert.equal(empMe.supervisor_id, me.id);
+  const moved = (await owner('GET', `/api/tasks/${own.id}`)).data.task;
+  assert.equal(moved.assignee_id, me.id);
+  assert.equal(moved.standalone, 1);
+  assert.equal((await owner('GET', `/api/tasks/${done.id}`)).data.task.assignee_name, 'حساب محذوف', 'history keeps the anonymised name');
+  // The deleted person disappears from lists, and the email is free again.
+  assert.ok(!(await owner('GET', '/api/users')).data.users.some((u) => u.id === lead.id));
+  assert.equal((await owner('POST', '/api/users', { name: 'New Lead', email: 'lead@gamma.co', password: 'secret123', roles: ['team_leader'], supervisor_id: me.id })).status, 200);
+  // The report the employee sent to the deleted lead is still in the employee's sent box.
+  assert.equal((await empC('GET', '/api/reports?box=sent')).data.reports.length, 1);
+
+  // An owner with other people cannot delete themselves; the platform owner can delete the employee.
+  assert.equal((await owner('DELETE', '/api/me', { password: 'secret123' })).status, 400);
+  assert.equal((await platform('DELETE', `/api/platform/users/${me.id}`)).status, 400, 'owners go with their company');
+  assert.equal((await platform('DELETE', `/api/platform/users/${emp.id}`)).status, 200);
+  assert.equal((await empC('GET', '/api/me')).status, 401);
+  assert.equal((await acme('DELETE', `/api/platform/users/${me.id}`)).status, 403);
+});
+
+test('the platform owner deletes a whole company; a lone owner can delete theirs', async () => {
+  const delta = client();
+  await delta('POST', '/api/signup', { company_name: 'Delta', name: 'Delta Owner', email: 'owner@delta.co', password: 'secret123' });
+  const deltaId = (await delta('GET', '/api/me')).data.user.company.id;
+  await delta('POST', '/api/projects', { name: 'DP' });
+  await delta('POST', '/api/tasks', { title: 'Delta task' });
+
+  assert.equal((await platform('DELETE', `/api/platform/companies/${deltaId}`, { confirm_name: 'wrong' })).status, 400);
+  assert.equal((await platform('DELETE', `/api/platform/companies/${deltaId}`, { confirm_name: 'Delta' })).status, 200);
+  assert.equal((await delta('GET', '/api/me')).status, 401);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM companies WHERE id = ?', deltaId)).n, 0);
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM users WHERE email = 'owner@delta.co'")).n, 0);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM projects WHERE company_id = ?', deltaId)).n, 0);
+
+  const ownCompany = (await platform('GET', '/api/me')).data.user.company.id;
+  assert.equal((await platform('DELETE', `/api/platform/companies/${ownCompany}`, { confirm_name: 'ابتكار' })).status, 400);
+  assert.equal((await platform('DELETE', '/api/me', { password: 'secret123' })).status, 400, 'the only platform owner stays');
+
+  const solo = client();
+  await solo('POST', '/api/signup', { company_name: 'Solo', name: 'Solo Owner', email: 'owner@solo.co', password: 'secret123' });
+  const r = await solo('DELETE', '/api/me', { password: 'secret123' });
+  assert.equal(r.data.deleted, 'company');
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM companies WHERE name = 'Solo'")).n, 0);
+});

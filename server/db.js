@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS users (
   company_id    INTEGER REFERENCES companies(id),
   is_platform   INTEGER NOT NULL DEFAULT 0, -- may open the platform dashboard (all companies)
   last_login_at TEXT,
+  deleted_at    TEXT,                       -- set when the account was deleted (details are wiped, history kept)
   roles         TEXT NOT NULL DEFAULT '',
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL
@@ -260,6 +261,7 @@ const ADDED_COLUMNS = [
   ['users', 'company_id', 'INTEGER REFERENCES companies(id)'],
   ['users', 'is_platform', 'INTEGER NOT NULL DEFAULT 0'],
   ['users', 'last_login_at', 'TEXT'],
+  ['users', 'deleted_at', 'TEXT'],
   ['projects', 'company_id', 'INTEGER REFERENCES companies(id)'],
 ];
 

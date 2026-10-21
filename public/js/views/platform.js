@@ -197,6 +197,7 @@ export async function viewCompany(id) {
             ${u.phone ? `<button class="icon-btn wa" data-wa-user="${u.id}" aria-label="واتساب">${icon('whatsapp')}</button>` : ''}
             <button class="icon-btn" data-reset="${u.id}" aria-label="إعادة تعيين كلمة المرور">${icon('key')}</button>
             ${u.id !== state.me.id ? `<button class="icon-btn" data-toggle="${u.id}" aria-label="${u.active ? 'إيقاف' : 'تفعيل'}">${icon(u.active ? 'x' : 'check')}</button>` : ''}
+            ${u.id !== state.me.id && u.role !== 'owner' ? `<button class="icon-btn danger-text" data-delete-user="${u.id}" aria-label="حذف الحساب">${icon('trash')}</button>` : ''}
           </div></div>`).join('')}</div>
       </section>
       <aside class="stack">
@@ -207,6 +208,10 @@ export async function viewCompany(id) {
             ${c.owner.phone ? `<div class="muted small" dir="ltr" style="text-align:right">+${esc(c.owner.phone)}</div>` : ''}</div></div>` : '—'}
           ${c.notes ? `<div class="callout blue" style="margin-top:.8rem">${icon('report')}<div class="pre">${esc(c.notes)}</div></div>` : ''}
         </section>
+        ${users.some((u) => u.is_platform) ? '' : `<section class="danger-zone" style="margin-top:0">
+          <div class="grow"><strong>حذف الشركة نهائيًا</strong>
+            <div class="muted small">تُحذف الشركة وجميع حساباتها ومشاريعها ومهامها وتقاريرها، ولا يمكن التراجع.</div></div>
+          <button class="btn ghost danger-text" id="delete-company">${icon('trash')}حذف الشركة</button></section>`}
         <section class="card">
           <div class="card-head"><h3>سجل الاشتراك</h3></div>
           <ul class="timeline">${events.map((e) => `<li><strong>${esc(EVENT_LABELS[e.kind] || e.kind)}</strong>
@@ -296,6 +301,27 @@ export async function viewCompany(id) {
     };
     if (u.active) confirmDialog(`إيقاف حساب ${u.name}؟ سيُسجَّل خروجه من جميع الأجهزة.`, run, 'إيقاف');
     else run();
+  }));
+  $$('[data-delete-user]', el).forEach((b) => b.addEventListener('click', () => {
+    const u = byId.get(Number(b.dataset.deleteUser));
+    confirmDialog(`حذف حساب ${u.name} نهائيًا؟ تنتقل مهامه المفتوحة وفريقه إلى مسؤوله المباشر، وتبقى سجلاته باسم «حساب محذوف».`, async () => {
+      const r = await api('DELETE', `/api/platform/users/${u.id}`, {});
+      toast(r.moved_tasks ? `تم حذف الحساب ونقل ${r.moved_tasks} من مهامه` : 'تم حذف الحساب');
+      window.dispatchEvent(new Event('refresh-view'));
+    }, 'حذف نهائي');
+  }));
+  const deleteCompanyBtn = $('#delete-company', el);
+  if (deleteCompanyBtn) deleteCompanyBtn.addEventListener('click', () => openModal({
+    title: `حذف ${c.name} نهائيًا`,
+    danger: true,
+    submitLabel: 'حذف الشركة نهائيًا',
+    body: `<div class="callout red">${icon('alert')}<div>ستُحذف الشركة نهائيًا مع جميع بياناتها: الحسابات (${c.total_users})، والمشاريع (${stats.projects})، والمهام (${stats.tasks})، والتقارير (${stats.reports}). لا يمكن التراجع عن هذا الإجراء.</div></div>
+      <div class="field"><label>للتأكيد اكتب اسم الشركة: <strong>${esc(c.name)}</strong></label><input name="confirm_name" required autocomplete="off"></div>`,
+    onSubmit: async (d) => {
+      await api('DELETE', `/api/platform/companies/${c.id}`, { confirm_name: d.confirm_name });
+      toast(`تم حذف شركة «${c.name}»`);
+      location.hash = '#/platform';
+    },
   }));
   $$('[data-reset]', el).forEach((b) => b.addEventListener('click', () => {
     const u = byId.get(Number(b.dataset.reset));

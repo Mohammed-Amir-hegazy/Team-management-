@@ -8,6 +8,7 @@ const v = require('../validate');
 const auth = require('../auth');
 const { getUser, publicUser, notify } = require('../access');
 const { normalizePhone } = require('../phone');
+const { assertDeletable, deleteAccount, deleteCompany } = require('../accounts');
 const {
   PLANS, PLAN_LABELS, addYears, addDays, accessOf, activeSeats, logEvent, createCompany, companyAdmins,
 } = require('../subscription');
@@ -19,7 +20,7 @@ function requirePlatform(user) {
 const COMPANY_SQL = `
   SELECT c.*,
     (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.active = 1) AS active_users,
-    (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) AS total_users,
+    (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id AND u.deleted_at IS NULL) AS total_users,
     (SELECT MAX(u.last_login_at) FROM users u WHERE u.company_id = c.id) AS last_activity,
     (SELECT u.id FROM users u WHERE u.company_id = c.id AND u.role = 'owner' ORDER BY u.id LIMIT 1) AS owner_id
   FROM companies c
@@ -109,7 +110,7 @@ module.exports = function register(router) {
     requirePlatform(user);
     const company = await withOwner(db, await loadCompany(db, v.id(params.id, 'الشركة')));
     const users = (await db.all(`SELECT u.*, s.name AS supervisor_name FROM users u LEFT JOIN users s ON s.id = u.supervisor_id
-      WHERE u.company_id = ? ORDER BY u.active DESC, u.name`, company.id))
+      WHERE u.company_id = ? AND u.deleted_at IS NULL ORDER BY u.active DESC, u.name`, company.id))
       .map((u) => ({ ...publicUser(u), supervisor_name: u.supervisor_name, last_login_at: u.last_login_at }));
     const events = await db.all(`SELECT e.*, u.name AS user_name FROM subscription_events e LEFT JOIN users u ON u.id = e.user_id
       WHERE e.company_id = ? ORDER BY e.id DESC LIMIT 100`, company.id);
@@ -217,5 +218,25 @@ module.exports = function register(router) {
       await logEvent(db, target.company_id, 'password_reset', target.name, user.id);
     }
     return { user: publicUser(await getUser(db, target.id)), seats_used: await activeSeats(db, target.company_id) };
+  }, { ungated: true });
+
+  router.delete('/api/platform/users/:id', async ({ db, user, params }) => {
+    requirePlatform(user);
+    const target = await getUser(db, v.id(params.id, 'المستخدم'));
+    if (target && target.id === user.id) throw new HttpError(400, 'لحذف حسابك استخدم «حذف حسابي» من صفحة حسابي');
+    await assertDeletable(db, target);
+    const result = await deleteAccount(db, target, user);
+    return { ok: true, ...result };
+  }, { ungated: true });
+
+  // Deletes a company and all of its data; the exact company name must be typed to confirm.
+  router.delete('/api/platform/companies/:id', async ({ db, user, params, body }) => {
+    requirePlatform(user);
+    const company = await loadCompany(db, v.id(params.id, 'الشركة'));
+    if (String(body.confirm_name || '').trim() !== company.name) {
+      throw new HttpError(400, 'يُرجى كتابة اسم الشركة كما هو لتأكيد الحذف');
+    }
+    await deleteCompany(db, company.id);
+    return { ok: true };
   }, { ungated: true });
 };

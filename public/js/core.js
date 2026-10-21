@@ -214,6 +214,7 @@ export function openModal({ title, body, submitLabel = 'حفظ', onSubmit, dange
     if (!onSubmit) return;
     const btn = $('button[type=submit]', form);
     const label = btn ? btn.innerHTML : '';
+    $('.form-error', form).textContent = '';
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>'; }
     try {
       const keep = await onSubmit(formData(form), form);
