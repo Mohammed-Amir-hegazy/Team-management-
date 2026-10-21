@@ -38,7 +38,6 @@ module.exports = function register(router) {
   });
 
   router.post('/api/projects', async ({ db, user, body }) => {
-    if (user.role === 'employee') throw new HttpError(403, 'إنشاء المشاريع متاح للمديرين وقادة الفرق وصاحب الشركة فقط');
     const name = v.text(body.name, 'اسم المشروع', { max: 200 });
     const description = v.text(body.description, 'الوصف', { required: false, max: 5000 });
     const memberIds = Array.isArray(body.member_ids) ? body.member_ids.map((x) => v.id(x, 'العضو')) : [];

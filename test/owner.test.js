@@ -74,6 +74,10 @@ test('a company registered by its system admin, with the owner added later', asy
     name: 'Lead', email: 'lead@delta.co', password: 'secret123', roles: ['team_leader'], supervisor_id: me.id,
   })).data.user;
   assert.equal(lead.supervisor_id, me.id);
+  // Nobody is above a manager until the owner exists, so another manager starts at the top.
+  const peer = await admin('POST', '/api/users', { name: 'Peer', email: 'peer@delta.co', password: 'secret123', roles: ['manager'], supervisor_id: null });
+  assert.equal(peer.status, 200, JSON.stringify(peer.data));
+  assert.equal(peer.data.user.supervisor_id, null);
   const owner = await admin('POST', '/api/users', { name: 'Owner', email: 'owner@delta.co', password: 'secret123', roles: ['owner'] });
   assert.equal(owner.status, 200, JSON.stringify(owner.data));
   assert.equal(owner.data.user.role, 'owner');
@@ -84,6 +88,24 @@ test('a company registered by its system admin, with the owner added later', asy
   assert.equal((await ownerC('POST', '/api/login', { email: 'owner@delta.co', password: 'secret123' })).status, 200);
   const users = (await ownerC('GET', '/api/users')).data.users;
   assert.equal(users.find((u) => u.id === lead.id).supervisor_id, me.id);
+  assert.equal(users.find((u) => u.id === peer.data.user.id).supervisor_id, owner.data.user.id);
+  // With an owner in place, everyone needs a direct supervisor again.
+  assert.equal((await admin('POST', '/api/users', { name: 'M3', email: 'm3@delta.co', password: 'secret123', roles: ['manager'] })).status, 400);
+
+  // Any employee may start a project of their own and add tasks to it; their supervisors follow it.
+  const emp = (await admin('POST', '/api/users', {
+    name: 'Emp', email: 'emp@delta.co', password: 'secret123', roles: ['employee'], supervisor_id: lead.id,
+  })).data.user;
+  const empC = client();
+  await empC('POST', '/api/login', { email: 'emp@delta.co', password: 'secret123' });
+  const proj = await empC('POST', '/api/projects', { name: 'My initiative' });
+  assert.equal(proj.status, 200, JSON.stringify(proj.data));
+  const t = await empC('POST', `/api/projects/${proj.data.project.id}/tasks`, { title: 'First step' });
+  assert.equal(t.status, 200, JSON.stringify(t.data));
+  assert.equal(t.data.task.assignee_id, emp.id);
+  assert.equal((await empC('POST', `/api/projects/${proj.data.project.id}/tasks`, { title: 'x', assignee_id: lead.id })).status, 403);
+  assert.ok((await admin('GET', '/api/projects')).data.projects.some((p) => p.id === proj.data.project.id), 'visible up the chain');
+  assert.ok((await ownerC('GET', '/api/projects')).data.projects.some((p) => p.id === proj.data.project.id));
 });
 
 test('the platform owner is decided by email and signs in with a code', async () => {

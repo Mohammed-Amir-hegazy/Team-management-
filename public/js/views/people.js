@@ -107,7 +107,8 @@ function userModal(users, user) {
   const roles = editing ? user.roles : ['employee'];
   const titles = [...new Set(users.map((u) => u.job_title).filter(Boolean))];
   // A company registered by its system admin may still be without an owner; one can be added.
-  const canAddOwner = !editing && !users.some((u) => u.role === 'owner' && u.active);
+  const hasOwner = users.some((u) => u.role === 'owner' && u.active);
+  const canAddOwner = !editing && !hasOwner;
 
   // Never offer someone's own subtree as their supervisor.
   const below = new Set();
@@ -146,7 +147,7 @@ function userModal(users, user) {
         <div class="checks cols">${[...(canAddOwner ? ['owner'] : []), 'manager', 'team_leader', 'employee', 'admin'].map((r) => `<label class="check">
           <input type="checkbox" name="roles" value="${r}" data-multi ${roles.includes(r) ? 'checked' : ''}>
           <span class="grow">${ROLE_LABELS[r]}<small>${ROLE_HINTS[r]}</small></span></label>`).join('')}</div></div>
-      <div class="field" data-supervisor><label>المسؤول المباشر</label><select name="supervisor_id" required></select>
+      <div class="field" data-supervisor><label>المسؤول المباشر</label><select name="supervisor_id"></select>
         <span class="hint">يرفع إليه الموظف تقاريره وطلباته مباشرة.</span></div>
       ${editing && user.id !== state.me.id ? `<label class="switch"><input type="checkbox" name="active" ${user.active ? 'checked' : ''}> الحساب نشط</label>` : ''}`}`,
     submitLabel: editing ? 'حفظ التعديلات' : 'إنشاء الحساب',
@@ -184,12 +185,17 @@ function userModal(users, user) {
     $('[data-supervisor]', form).classList.toggle('hidden', asOwner);
     if (asOwner) { select.disabled = true; return; }
     const level = primaryOf(chosen);
-    const current = Number(select.value) || (editing ? user.supervisor_id : state.me.id);
+    const current = select.dataset.touched ? Number(select.value) : (editing ? user.supervisor_id : state.me.id);
     select.innerHTML = level ? supervisorOptions(level, current) : '';
     select.disabled = !level;
     if (!level) select.innerHTML = '<option value="">اختر مستوى وظيفيًا أولًا (مدير أو قائد فريق أو موظف)</option>';
-    else if (!select.innerHTML) select.innerHTML = '<option value="">لا يوجد مسؤول مناسب لهذا المستوى</option>';
+    // Without an owner yet, anyone may sit at the top; they move under the owner once it is added.
+    else if (!hasOwner) {
+      select.insertAdjacentHTML('afterbegin', `<option value="" ${current && select.querySelector(`option[value="${current}"]`) ? '' : 'selected'}>
+        بدون مسؤول مباشر — في قمة الهيكل لحين إضافة صاحب الشركة</option>`);
+    } else if (!select.innerHTML) select.innerHTML = '<option value="">لا يوجد مسؤول مناسب لهذا المستوى؛ يُرجى إضافة شخص في مستوى أعلى أولًا</option>';
   };
   refresh();
+  select.addEventListener('change', () => { select.dataset.touched = '1'; });
   $$('input[name=roles]', form).forEach((i) => i.addEventListener('change', refresh));
 }

@@ -131,7 +131,8 @@ test('projects and tasks', async () => {
   assert.equal(p.status, 200, JSON.stringify(p.data));
   project = p.data.project;
 
-  assert.equal((await employee('POST', '/api/projects', { name: 'Nope' })).status, 403);
+  // Employees may start projects too, but only with people from their own team (they have none).
+  assert.equal((await employee('POST', '/api/projects', { name: 'Nope', member_ids: [people.leader.id] })).status, 403);
 
   // Leader assigns to their employee; the employee is auto-added to the project.
   const deadline = new Date(Date.now() + 3600 * 1000).toISOString();

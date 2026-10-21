@@ -49,17 +49,33 @@ async function emailTaken(db, email, exceptId = 0) {
   return !!(await db.get('SELECT 1 FROM users WHERE email = ? AND id != ?', email, exceptId));
 }
 
+async function companyHasOwner(db, companyId) {
+  return !!(await db.get("SELECT 1 FROM users WHERE company_id = ? AND role = 'owner' AND active = 1 AND deleted_at IS NULL", companyId));
+}
+
+// The direct supervisor chosen in the form. Until a company has its owner (it was registered by its system
+// admin), people may sit at the top without one; they move under the owner as soon as it is added.
+async function readSupervisor(db, value, companyId) {
+  if (value === null || value === undefined || value === '' || value === 0) {
+    if (await companyHasOwner(db, companyId)) throw new HttpError(400, 'يُرجى اختيار المسؤول المباشر');
+    return null;
+  }
+  return v.id(value, 'المسؤول المباشر');
+}
+
 // A supervisor must sit at a higher level, and nobody may end up supervising themselves.
 async function checkPlacement(db, { userId = null, level, supervisorId, companyId }) {
-  const supervisor = await getUser(db, supervisorId);
-  if (!supervisor || !supervisor.active || supervisor.company_id !== companyId) {
-    throw new HttpError(400, 'المسؤول المباشر المحدد غير موجود');
-  }
-  if (roleRank(supervisor.role) >= roleRank(level)) {
-    throw new HttpError(400, 'يجب أن يكون المسؤول المباشر في مستوى وظيفي أعلى');
+  if (supervisorId) {
+    const supervisor = await getUser(db, supervisorId);
+    if (!supervisor || !supervisor.active || supervisor.company_id !== companyId) {
+      throw new HttpError(400, 'المسؤول المباشر المحدد غير موجود');
+    }
+    if (roleRank(supervisor.role) >= roleRank(level)) {
+      throw new HttpError(400, 'يجب أن يكون المسؤول المباشر في مستوى وظيفي أعلى');
+    }
   }
   if (userId) {
-    if (supervisorId === userId || (await subordinateIds(db, userId)).has(supervisorId)) {
+    if (supervisorId && (supervisorId === userId || (await subordinateIds(db, userId)).has(supervisorId))) {
       throw new HttpError(400, 'لا يمكن أن يكون المسؤول المباشر أحد مرؤوسي هذا المستخدم');
     }
     const reports = await db.all('SELECT role FROM users WHERE supervisor_id = ? AND active = 1', userId);
@@ -67,7 +83,6 @@ async function checkPlacement(db, { userId = null, level, supervisorId, companyI
       throw new HttpError(400, 'يوجد مرؤوسون لهذا المستخدم في مستوى مساوٍ أو أعلى من المستوى الجديد؛ يُرجى نقلهم أولًا');
     }
   }
-  return supervisor;
 }
 
 async function withSupervisorName(db, user) {
@@ -345,7 +360,7 @@ module.exports = function register(router) {
     } else {
       roles = validateRoles(body.roles);
       level = primaryRole(roles);
-      supervisorId = v.id(body.supervisor_id, 'المسؤول المباشر');
+      supervisorId = await readSupervisor(db, body.supervisor_id, user.company_id);
       await checkPlacement(db, { level, supervisorId, companyId: user.company_id });
     }
     if (await emailTaken(db, email)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
@@ -388,7 +403,7 @@ module.exports = function register(router) {
       }
       next.roles = roles.join(',');
       next.role = primaryRole(roles);
-      next.supervisor_id = body.supervisor_id !== undefined ? v.id(body.supervisor_id, 'المسؤول المباشر') : target.supervisor_id;
+      next.supervisor_id = body.supervisor_id !== undefined ? await readSupervisor(db, body.supervisor_id, user.company_id) : target.supervisor_id;
       await checkPlacement(db, { userId: target.id, level: next.role, supervisorId: next.supervisor_id, companyId: user.company_id });
     }
 

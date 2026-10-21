@@ -6,7 +6,8 @@ import {
 import { taskFormModal, sendRequirementsModal } from './tasks.js';
 import { composeReport } from './reports.js';
 
-const canCreateProjects = () => state.me.role !== 'employee';
+// Everyone can start a project; members can only be chosen from one's own team.
+const canCreateProjects = () => true;
 
 export async function viewProjects() {
   setTitle('المشاريع');
