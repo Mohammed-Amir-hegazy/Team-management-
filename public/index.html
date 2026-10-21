@@ -14,6 +14,15 @@
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="preload" href="/fonts/ebtikar.woff2" as="font" type="font/woff2" crossorigin>
+  <script>
+    // Applied before the first paint so the page never flashes in the wrong theme (see js/theme.js).
+    (function () {
+      var pref = 'auto';
+      try { pref = localStorage.getItem('theme') || 'auto'; } catch (e) {}
+      var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    })();
+  </script>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>

@@ -14,6 +14,7 @@ import { viewPeople } from './views/people.js';
 import { viewNotifications } from './views/notifications.js';
 import { viewPlatform, viewCompany } from './views/platform.js';
 import { viewSubscription, subscriptionBanner } from './views/subscription.js';
+import { themeButton, themeSwitch } from './theme.js';
 
 const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
@@ -64,6 +65,7 @@ async function showAuth() {
     toast(err.message, { error: true });
   }
   el.innerHTML = `
+    ${themeButton('auth-theme')}
     <span class="blob a"></span><span class="blob b"></span>
     <div class="auth-card card">
       <div class="auth-logo">${mark('animate')}<img class="only-light" src="/brand/wordmark-navy.svg" alt="EBTIKAR"><img class="only-dark" src="/brand/wordmark-white.svg" alt=""></div>
@@ -355,6 +357,7 @@ function showApp() {
     <div class="grow"><div class="name">${esc(me.name)}</div><div class="title">${esc(me.job_title || ROLE_LABELS[me.role])}</div></div>${icon('more')}`;
   $('#side-user').onclick = accountSheet;
   $('#bell').innerHTML = `${icon('bell')}<span class="dot hidden" id="bell-dot"></span>`;
+  if (!$('#topbar [data-theme-btn]')) $('#bell').insertAdjacentHTML('beforebegin', themeButton());
 
   $('#tabbar').innerHTML = [
     ['dashboard', 'الرئيسية', 'home'],
@@ -416,6 +419,8 @@ function accountSheet() {
         <div class="item">${icon('user')}<span class="grow">البريد الإلكتروني</span><span class="muted" dir="ltr">${esc(me.email)}</span></div>
         <div class="item">${icon('users')}<span class="grow">المسؤول المباشر</span><span class="muted">${esc(me.supervisor_name || '—')}</span></div>
       </div>
+      <h3>المظهر</h3>
+      <div style="margin-bottom:1.2rem">${themeSwitch()}</div>
       <h3>رقم واتساب</h3>
       <div class="inline-form" style="margin-bottom:1.2rem">
         <div class="field"><input name="phone" type="tel" dir="ltr" value="${esc(me.phone ? `+${me.phone}` : '')}" placeholder="2010xxxxxxxx+"></div>
