@@ -184,19 +184,20 @@ export async function viewCompany(id) {
     <div class="grid side">
       <section class="card">
         <div class="card-head"><h2>حسابات الشركة</h2><div class="actions" style="min-width:180px">${seatsMeter(c.active_users, c.seats)}</div></div>
-        <div class="table-wrap"><table class="data">
-          <thead><tr><th>المستخدم</th><th>الأدوار</th><th>آخر دخول</th><th>الحالة</th><th></th></tr></thead>
-          <tbody>${users.map((u) => `<tr>
-            <td><div class="row">${avatar(u.name, u.id, 'sm')}<div><div><strong>${esc(u.name)}</strong></div>
-              <div class="muted small">${esc(u.job_title || '')} <span dir="ltr">${esc(u.email)}</span></div></div></div></td>
-            <td>${u.roles.map((r) => `<span class="pill gray plain">${ROLE_LABELS[r]}</span>`).join(' ')}</td>
-            <td class="small nowrap">${u.last_login_at ? esc(relTime(u.last_login_at)) : '—'}</td>
-            <td>${u.active ? '<span class="pill green plain">نشط</span>' : '<span class="pill red plain">موقوف</span>'}</td>
-            <td class="nowrap">
-              ${u.phone ? `<button class="icon-btn wa" data-wa-user="${u.id}" aria-label="واتساب">${icon('whatsapp')}</button>` : ''}
-              <button class="icon-btn" data-reset="${u.id}" aria-label="إعادة تعيين كلمة المرور">${icon('key')}</button>
-              ${u.id !== state.me.id ? `<button class="icon-btn" data-toggle="${u.id}" aria-label="${u.active ? 'إيقاف' : 'تفعيل'}">${icon(u.active ? 'x' : 'check')}</button>` : ''}
-            </td></tr>`).join('')}</tbody></table></div>
+        <div class="list">${users.map((u) => `<div class="item account ${u.active ? '' : 'off'}">
+          ${avatar(u.name, u.id)}
+          <div class="grow">
+            <div class="row wrap" style="gap:.35rem"><strong>${esc(u.name)}</strong>
+              ${u.active ? '<span class="pill green plain">نشط</span>' : '<span class="pill red plain">موقوف</span>'}</div>
+            <div class="meta">${esc(u.job_title || '')}${u.job_title ? ' · ' : ''}<span dir="ltr" class="email">${esc(u.email)}</span></div>
+            <div class="meta">${u.roles.map((r) => `<span class="pill gray plain">${ROLE_LABELS[r]}</span>`).join(' ')}
+              <span>آخر دخول: ${u.last_login_at ? esc(relTime(u.last_login_at)) : '—'}</span></div>
+          </div>
+          <div class="row account-actions" style="gap:.3rem">
+            ${u.phone ? `<button class="icon-btn wa" data-wa-user="${u.id}" aria-label="واتساب">${icon('whatsapp')}</button>` : ''}
+            <button class="icon-btn" data-reset="${u.id}" aria-label="إعادة تعيين كلمة المرور">${icon('key')}</button>
+            ${u.id !== state.me.id ? `<button class="icon-btn" data-toggle="${u.id}" aria-label="${u.active ? 'إيقاف' : 'تفعيل'}">${icon(u.active ? 'x' : 'check')}</button>` : ''}
+          </div></div>`).join('')}</div>
       </section>
       <aside class="stack">
         <section class="card">

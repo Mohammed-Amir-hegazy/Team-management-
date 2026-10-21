@@ -343,7 +343,9 @@ input.otp { font-size: 1.6rem; letter-spacing: .6em; text-align: center; font-va
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
 .grid.cards { grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); }
 .grid.side { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
-@media (max-width: 1000px) { .grid.side { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .grid.side { grid-template-columns: minmax(0, 1fr); } }
+/* Grid and flex children must be allowed to shrink, or a wide table inside them widens the whole page on phones. */
+.grid > *, .stack > *, .main, .view { min-width: 0; }
 @media (max-width: 420px) { .grid.two, .grid.cards { grid-template-columns: 1fr; } }
 
 /* Hero */
@@ -895,3 +897,18 @@ input[type="checkbox"] { width: auto; accent-color: var(--primary); }
 .lock-card { text-align: center; padding: 2.4rem 1.4rem; max-width: 560px; margin: 2rem auto; }
 .lock-card .mark { width: 54px; margin: 0 auto 1rem; }
 .signup-cta { display: flex; gap: .4rem; justify-content: center; flex-wrap: wrap; margin-top: 1.1rem; font-size: .92rem; }
+
+@media (max-width: 600px) {
+  .sub-hero { padding: 1.2rem 1.1rem; }
+  .sub-hero .quick { display: grid; grid-template-columns: 1fr 1fr; }
+  .sub-hero .quick .btn { white-space: normal; text-align: center; padding: .6rem .5rem; }
+  .sub-hero .quick .btn.accent { grid-column: 1 / -1; }
+  .card-head { flex-wrap: wrap; }
+  .card-head .actions { min-width: 0 !important; width: 100%; margin-inline-start: 0; }
+  table.data td, table.data th { padding: .55rem .4rem; }
+}
+
+.item.account { align-items: flex-start; flex-wrap: wrap; }
+.item.account.off { opacity: .6; }
+.item.account .email { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .item.account .account-actions { width: 100%; justify-content: flex-end; } }
