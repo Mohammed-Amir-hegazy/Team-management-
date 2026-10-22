@@ -1,0 +1,21 @@
+{
+  "name": "ebtikar-team-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "تطبيق ابتكار (ادارة الفريق) للموبايل: غلاف Capacitor لمنصة team.ebtikar.dev",
+  "scripts": {
+    "assets": "capacitor-assets generate --android --iconBackgroundColor '#06044B' --iconBackgroundColorDark '#06044B' --splashBackgroundColor '#06044B' --splashBackgroundColorDark '#06044B'",
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/push-notifications": "8.1.3",
+    "@capacitor/splash-screen": "8.0.2"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "3.0.5",
+    "@capacitor/cli": "8.5.3"
+  }
+}

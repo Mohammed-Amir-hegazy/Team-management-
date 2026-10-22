@@ -3,6 +3,7 @@
 // Role hierarchy and every permission rule lives here so the routes stay declarative.
 
 const { HttpError } = require('./http');
+const { queuePush } = require('./push');
 const { now } = require('./db');
 
 // Organisational levels, highest first. A user's `role` column holds their highest level;
@@ -238,9 +239,12 @@ async function deleteProject(db, projectId) {
 
 // ---- Notifications --------------------------------------------------------
 
-function notify(db, userId, type, message, link = '') {
-  return db.run('INSERT INTO notifications (user_id, type, message, link, created_at) VALUES (?, ?, ?, ?, ?)',
+// An in-app notification, also pushed to the person's phones and browsers.
+async function notify(db, userId, type, message, link = '') {
+  const result = await db.run('INSERT INTO notifications (user_id, type, message, link, created_at) VALUES (?, ?, ?, ?, ?)',
     userId, type, message, link, now());
+  queuePush(userId, message, link);
+  return result;
 }
 
 function publicUser(user) {

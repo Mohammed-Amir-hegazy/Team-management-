@@ -18,6 +18,9 @@ import { themeButton, themeSwitch } from './theme.js';
 import { viewBrand } from './views/brand.js';
 import { viewAsks } from './views/asks.js';
 import { viewUpdates, showWhatsNew } from './views/updates.js';
+import {
+  registerServiceWorker, initNativeApp, maybePromptPush, pushKind, pushEnabled, enablePush, forgetDevice,
+} from './device.js';
 
 const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
@@ -29,6 +32,7 @@ async function boot() {
   const minSplash = new Promise((r) => setTimeout(r, 900));
   try {
     state.config = await api('GET', '/api/client-config');
+    registerServiceWorker();
   } catch { /* defaults: optional features hidden */ }
   try {
     const { user } = await api('GET', '/api/me');
@@ -351,6 +355,7 @@ window.addEventListener('session-expired', () => {
 });
 
 async function logout() {
+  await forgetDevice();
   await api('POST', '/api/logout', {}).catch(() => {});
   state.me = null;
   location.hash = '';
@@ -410,6 +415,8 @@ function showApp() {
   startPolling();
   // After an update, its news (and any steps for admins) opens once.
   setTimeout(showWhatsNew, 1200);
+  initNativeApp();
+  setTimeout(maybePromptPush, 2500);
 }
 
 function sheetItem(href, label, ic, extra = '') {
@@ -463,6 +470,7 @@ function accountSheet() {
         <div class="item">${icon('user')}<span class="grow">البريد الإلكتروني</span><span class="muted" dir="ltr">${esc(me.email)}</span></div>
         <div class="item">${icon('users')}<span class="grow">المسؤول المباشر</span><span class="muted">${esc(me.supervisor_name || '—')}</span></div>
       </div>
+      <div data-push-row></div>
       <h3>المظهر</h3>
       <div style="margin-bottom:1.2rem">${themeSwitch()}</div>
       <h3>النوع</h3>
@@ -527,6 +535,28 @@ function accountSheet() {
     toast('تم حذف صورتك');
   }).then(syncPhotoButtons));
   $('[data-delete-account]', el).addEventListener('click', () => { el.remove(); deleteMyAccount(); });
+  // Notifications on this device: on/off state and a button to turn them on.
+  (async () => {
+    const row = $('[data-push-row]', el);
+    const kind = pushKind();
+    if (!kind) return;
+    const on = kind !== 'ios-install' && await pushEnabled();
+    row.innerHTML = `<h3>الإشعارات على هذا الجهاز</h3><div class="inline-form" style="margin-bottom:1.2rem;align-items:center">
+      <span class="grow">${on ? '✅ مفعّلة؛ تصلك الإشعارات حتى لو كانت المنصة مغلقة.'
+    : kind === 'ios-install' ? 'على الآيفون: أضف المنصة إلى الشاشة الرئيسية من Safari ثم افتحها من أيقونتها لتفعيل الإشعارات.'
+      : 'غير مفعّلة على هذا الجهاز.'}</span>
+      ${!on && kind !== 'ios-install' ? `<button class="btn subtle" type="button" data-push-on>${icon('bell')}تفعيل</button>` : ''}</div>`;
+    const btn = $('[data-push-on]', row);
+    if (btn) {
+      let done = false;
+      btn.addEventListener('click', (e) => busy(e.currentTarget, async () => {
+        await enablePush();
+        done = true;
+        toast('تم تفعيل الإشعارات على هذا الجهاز');
+        row.querySelector('.grow').textContent = '✅ مفعّلة؛ تصلك الإشعارات حتى لو كانت المنصة مغلقة.';
+      }).then(() => { if (done) btn.remove(); }));
+    }
+  })();
   $('[name=my_gender]', el).addEventListener('change', async (e) => {
     try {
       const { user } = await api('PATCH', '/api/me', { gender: e.target.value });

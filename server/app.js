@@ -6,6 +6,7 @@ const { userFromSession } = require('./auth');
 const { loadConfig } = require('./config');
 const { createMessenger } = require('./messaging');
 const { accessOf, accessError } = require('./subscription');
+const { initPush, pushInfo, withPushScope } = require('./push');
 
 const MUTATING = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -16,13 +17,19 @@ function createApp(db, {
 } = {}) {
   const config = { ...loadConfig(), ...overrides };
   const router = new Router();
+  // Push keys are read (or made) once; requests wait for that on first use only.
+  const pushReady = initPush(db).catch((err) => console.error('push setup:', err.message));
   // For uptime checks and keep-awake pings: never touches the database.
   router.get('/api/health', () => ({ ok: true }), { public: true });
   // Which optional integrations are switched on, so the interface only offers what works.
-  router.get('/api/client-config', () => ({
-    otp: messenger.channels, uploads: true, signup: !!config.allowSignup, trial_days: config.trialDays,
-    storage_warning: config.storageWarning || null,
-  }), { public: true });
+  router.get('/api/client-config', async () => {
+    await pushReady;
+    return {
+      otp: messenger.channels, uploads: true, signup: !!config.allowSignup, trial_days: config.trialDays,
+      storage_warning: config.storageWarning || null,
+      push: pushInfo(),
+    };
+  }, { public: true });
   require('./routes/users')(router);
   require('./routes/projects')(router);
   require('./routes/tasks')(router);
@@ -33,6 +40,7 @@ function createApp(db, {
   require('./routes/password')(router);
   require('./routes/uploads')(router);
   require('./routes/brand')(router);
+  require('./routes/push')(router);
   require('./routes/subscription')(router);
   require('./routes/platform')(router);
 
@@ -72,7 +80,7 @@ function createApp(db, {
         const access = accessOf(ctx.user);
         if (!access.ok) throw accessError(access.reason);
       }
-      const result = await found.route.handler(ctx);
+      const result = await withPushScope(() => found.route.handler(ctx));
       // Handlers that stream a file (images) answer by themselves.
       if (res.headersSent) return;
       sendJson(res, 200, result ?? { ok: true });

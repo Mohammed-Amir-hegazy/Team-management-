@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ابتكار (ادارة الفريق)</string>
+    <string name="title_activity_main">ابتكار (ادارة الفريق)</string>
+    <string name="package_name">dev.ebtikar.team</string>
+    <string name="custom_url_scheme">dev.ebtikar.team</string>
+</resources>

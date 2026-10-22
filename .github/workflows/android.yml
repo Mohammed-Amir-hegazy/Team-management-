@@ -1,0 +1,95 @@
+# Builds the Android app «ابتكار (ادارة الفريق)» and publishes the APK.
+#
+# Every build: an APK for direct install (signed with the fixed test key, so each one updates the last),
+#   attached to the release «android-latest» and kept as a build artifact.
+# Optional repository secrets (Settings → Secrets and variables → Actions):
+#   GOOGLE_SERVICES_JSON     the Firebase google-services.json for dev.ebtikar.team (turns on phone notifications)
+#   ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#                            the Google Play upload key: also builds a signed .aab for the Play Store
+
+name: Android app
+
+on:
+  push:
+    paths: ['mobile/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: npm ci
+
+      - name: Firebase (phone notifications), when configured
+        if: env.GOOGLE_SERVICES_JSON != ''
+        run: |
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+          # Tells the web app this build can receive Firebase notifications.
+          node -e "const f='capacitor.config.json';const c=require('./'+f);c.android.appendUserAgent+=' EbtikarPush';require('fs').writeFileSync(f,JSON.stringify(c,null,2))"
+
+      - name: Sync web shell and plugins
+        run: npx cap sync android
+
+      - name: Build APK
+        working-directory: mobile/android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk "../dist/ebtikar-team-${VERSION_CODE}.apk"
+          cp app/build/outputs/apk/release/app-release.apk ../dist/ebtikar-team.apk
+
+      - name: Google Play bundle, when the upload key is configured
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_FILE"
+          ./gradlew --no-daemon bundleRelease
+          cp app/build/outputs/bundle/release/app-release.aab "../dist/ebtikar-team-${VERSION_CODE}.aab"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ebtikar-team-${{ github.run_number }}
+          path: mobile/dist/*
+
+      - name: Publish to the «android-latest» release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest >/dev/null 2>&1 || gh release create android-latest \
+            --title "تطبيق ابتكار (ادارة الفريق) — أحدث نسخة" --notes "أحدث نسخة من تطبيق أندرويد؛ تُحدَّث تلقائيًا مع كل تحديث." --target "${GITHUB_SHA}"
+          gh release upload android-latest dist/ebtikar-team.apk --clobber
+          gh release edit android-latest --notes "أحدث نسخة من تطبيق أندرويد (رقم ${VERSION_CODE})؛ تُحدَّث تلقائيًا مع كل تحديث. نزّل ebtikar-team.apk وثبّته على الهاتف."

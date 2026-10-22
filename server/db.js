@@ -170,6 +170,33 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Values the platform makes for itself once and keeps (e.g. its Web Push keys).
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+-- Browsers and installed web apps that receive push notifications (Web Push).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint   TEXT NOT NULL UNIQUE,
+  p256dh     TEXT NOT NULL,
+  auth       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
+
+-- Phones running the Android app (Firebase Cloud Messaging tokens).
+CREATE TABLE IF NOT EXISTS device_tokens (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token      TEXT NOT NULL UNIQUE,
+  platform   TEXT NOT NULL DEFAULT 'android',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_device_tokens_user ON device_tokens(user_id);
+
 -- Platform updates already announced to the companies (see releases.js).
 CREATE TABLE IF NOT EXISTS release_notices (
   id      TEXT PRIMARY KEY,

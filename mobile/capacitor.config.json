@@ -1,0 +1,26 @@
+{
+  "appId": "dev.ebtikar.team",
+  "appName": "ابتكار (ادارة الفريق)",
+  "webDir": "www",
+  "server": {
+    "url": "https://team.ebtikar.dev",
+    "androidScheme": "https",
+    "allowNavigation": ["team.ebtikar.dev"],
+    "errorPath": "offline.html"
+  },
+  "android": {
+    "appendUserAgent": "EbtikarApp/1.0",
+    "backgroundColor": "#06044B"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1200,
+      "launchAutoHide": true,
+      "backgroundColor": "#06044B",
+      "showSpinner": false
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    }
+  }
+}
