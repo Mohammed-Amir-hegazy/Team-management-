@@ -69,6 +69,9 @@ async function deleteAccount(db, target, actor) {
         : `حُذف حساب ${target.name}، وانتقل فريقه وطلباته المعلّقة إليك`, '#/tasks');
     }
 
+    // Requests waiting on the deleted person can no longer be answered.
+    await tx.run(`UPDATE work_requests SET status = 'cancelled', responded_at = ? WHERE status = 'pending'
+      AND (recipient_id = ? OR sender_id = ?)`, ts, target.id, target.id);
     await tx.run('DELETE FROM requirements WHERE requested_by = ? AND request_id IS NULL', target.id);
     await tx.run('DELETE FROM project_members WHERE user_id = ?', target.id);
     await tx.run('DELETE FROM sessions WHERE user_id = ?', target.id);
@@ -106,6 +109,7 @@ async function deleteCompany(db, companyId) {
       await tx.run(`DELETE FROM ${table} WHERE user_id IN (${inCompany})`, companyId);
     }
     await tx.run('DELETE FROM images WHERE company_id = ?', companyId);
+    await tx.run('DELETE FROM work_requests WHERE company_id = ?', companyId);
     await tx.run('DELETE FROM company_brands WHERE company_id = ?', companyId);
     await tx.run('DELETE FROM subscription_events WHERE company_id = ?', companyId);
     await tx.run('UPDATE subscription_events SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE company_id = ?)', companyId);

@@ -170,6 +170,27 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- A request from one person to any colleague in the company; the colleague can take it on as a task
+-- of their own (task_id) or decline it with a reason.
+CREATE TABLE IF NOT EXISTS work_requests (
+  id            INTEGER PRIMARY KEY,
+  company_id    INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  sender_id     INTEGER NOT NULL REFERENCES users(id),
+  recipient_id  INTEGER NOT NULL REFERENCES users(id),
+  title         TEXT NOT NULL,
+  details       TEXT NOT NULL DEFAULT '',
+  priority      TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
+  due_at        TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled')),
+  response_note TEXT NOT NULL DEFAULT '',
+  task_id       INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL,
+  responded_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_work_requests_recipient ON work_requests(recipient_id, status);
+CREATE INDEX IF NOT EXISTS idx_work_requests_sender ON work_requests(sender_id);
+CREATE INDEX IF NOT EXISTS idx_work_requests_task ON work_requests(task_id);
+
 -- Each person's own profile photo (a small square JPEG made in the browser).
 CREATE TABLE IF NOT EXISTS user_photos (
   user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,

@@ -27,6 +27,7 @@ function createApp(db, {
   require('./routes/projects')(router);
   require('./routes/tasks')(router);
   require('./routes/requests')(router);
+  require('./routes/workRequests')(router);
   require('./routes/reports')(router);
   require('./routes/notifications')(router);
   require('./routes/password')(router);

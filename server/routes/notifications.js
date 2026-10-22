@@ -17,8 +17,9 @@ module.exports = function register(router) {
       SELECT
         (SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL) AS unread,
         (SELECT COUNT(*) FROM reports WHERE recipient_id = ? AND read_at IS NULL) AS unread_reports,
-        (SELECT COUNT(*) FROM requests WHERE recipient_id = ? AND status = 'pending') AS pending_requests
-    `, user.id, user.id, user.id);
+        (SELECT COUNT(*) FROM requests WHERE recipient_id = ? AND status = 'pending') AS pending_requests,
+        (SELECT COUNT(*) FROM work_requests WHERE recipient_id = ? AND status = 'pending') AS pending_asks
+    `, user.id, user.id, user.id, user.id);
     return { notifications, ...counts };
   }, { ungated: true });
 

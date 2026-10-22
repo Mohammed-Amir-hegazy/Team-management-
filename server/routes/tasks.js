@@ -226,6 +226,8 @@ module.exports = function register(router) {
 
       const watchers = new Set([task.created_by, task.assignee_id]);
       if (assignee.supervisor_id) watchers.add(assignee.supervisor_id);
+      const asked = await tx.get('SELECT sender_id FROM work_requests WHERE task_id = ?', task.id);
+      if (asked) watchers.add(asked.sender_id);
       watchers.delete(user.id);
       const reason = note ? `: ${note}` : '';
       for (const uid of watchers) {
@@ -309,3 +311,5 @@ module.exports = function register(router) {
     return sendRequirements(db, user, { project, task, note });
   });
 };
+
+module.exports.createTask = createTask;

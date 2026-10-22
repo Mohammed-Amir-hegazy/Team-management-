@@ -3,6 +3,7 @@ import {
   ROLE_LABELS, ORG_ROLES, avatar, emptyState, rememberPhotos,
 } from '../core.js';
 import { openReminder } from '../remind.js';
+import { newAskModal } from './asks.js';
 import { openWhatsApp, generalMessage } from '../whatsapp.js';
 
 // Who I may remind: people below me (down) and my supervisor chain (up).
@@ -31,6 +32,7 @@ function personCard(u, admin) {
       <div class="roles">${u.roles.map((r) => `<span class="pill ${r === 'admin' ? 'navy' : 'gray'} plain">${ROLE_LABELS[r]}</span>`).join('')}</div>
     </div>
     <div class="row" style="gap:.3rem">
+      ${u.active && u.id !== state.me.id ? `<button class="icon-btn" data-ask="${u.id}" aria-label="طلب من ${esc(u.name)}" title="إرسال طلب">${icon('send')}</button>` : ''}
       ${u.phone && u.id !== state.me.id ? `<button class="icon-btn wa" data-wa="${u.id}" aria-label="مراسلة ${esc(u.name)} عبر واتساب">${icon('whatsapp')}</button>` : ''}
       ${u.active && relationTo(u) ? `<button class="icon-btn" data-remind="${u.id}" aria-label="تذكير ${esc(u.name)}">${icon('bell')}</button>` : ''}
       ${admin && u.manageable ? `<button class="icon-btn" data-edit="${u.id}" aria-label="تعديل ${esc(u.name)}">${icon('edit')}</button>` : ''}
@@ -73,6 +75,7 @@ export async function viewPeople() {
 
   const bindEdit = (root) => {
     $$('[data-edit]', root).forEach((b) => b.addEventListener('click', () => userModal(users, byId.get(Number(b.dataset.edit)))));
+    $$('[data-ask]', root).forEach((b) => b.addEventListener('click', () => newAskModal(Number(b.dataset.ask))));
     $$('[data-remind]', root).forEach((b) => b.addEventListener('click', () => {
       const u = byId.get(Number(b.dataset.remind));
       openReminder({ person: u, relation: relationTo(u) });

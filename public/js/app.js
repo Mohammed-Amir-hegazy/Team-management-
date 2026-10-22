@@ -16,6 +16,7 @@ import { viewPlatform, viewCompany } from './views/platform.js';
 import { viewSubscription, subscriptionBanner } from './views/subscription.js';
 import { themeButton, themeSwitch } from './theme.js';
 import { viewBrand } from './views/brand.js';
+import { viewAsks } from './views/asks.js';
 
 const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
@@ -363,6 +364,7 @@ function navItems() {
     ['tasks', 'المهام', 'tasks'],
     ['reports', 'التقارير', 'report', 'reports'],
     ['requests', 'الطلبات', 'box', 'requests'],
+    ['asks', 'طلبات الزملاء', 'send', 'asks'],
     me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
     ['people', me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users'],
     ['notifications', 'الإشعارات', 'bell', 'notifications'],
@@ -415,6 +417,7 @@ function moreSheet() {
     className: 'menu-sheet',
     body: `<div class="list">
       ${sheetItem('#/requests', 'الطلبات', 'box', badge(c.requests))}
+      ${sheetItem('#/asks', 'طلبات الزملاء', 'send', badge(c.asks))}
       ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
       ${sheetItem('#/people', state.me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users')}
       ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
@@ -559,6 +562,7 @@ const routes = {
   tasks: (p) => (p.id ? viewTask(p) : viewTasks(p)),
   reports: (p) => (p.id ? viewReport(p) : viewReports(p)),
   requests: (p) => (p.id ? viewRequest(p) : viewRequests(p)),
+  asks: viewAsks,
   team: viewTeam,
   people: viewPeople,
   notifications: viewNotifications,
@@ -636,7 +640,8 @@ async function pollNotifications() {
     setCount('notifications', data.unread);
     setCount('reports', data.unread_reports);
     setCount('requests', data.pending_requests);
-    setCount('more', data.unread + data.pending_requests);
+    setCount('asks', data.pending_asks);
+    setCount('more', data.unread + data.pending_requests + data.pending_asks);
     const dot = $('#bell-dot');
     if (dot) dot.classList.toggle('hidden', !data.unread);
 

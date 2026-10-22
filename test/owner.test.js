@@ -299,3 +299,66 @@ test('everyone adds, changes and removes their own profile photo', async () => {
   assert.equal((await e('DELETE', '/api/me/photo')).data.user.photo_url, null);
   assert.equal((await fetch(base + listed.photo_url, { headers: { Cookie: await cookieOf('o@faces.co') } })).status, 404);
 });
+
+test('anyone asks any colleague, who takes it on as a task or declines it', async () => {
+  const boss = client();
+  await boss('POST', '/api/signup', { company_name: 'Asks', name: 'Asks Owner', email: 'o@asks.co', password: 'secret123' });
+  const me = (await boss('GET', '/api/me')).data.user;
+  const add = async (body) => (await boss('POST', '/api/users', { password: 'secret123', ...body })).data.user;
+  const lead = await add({ name: 'Lead', email: 'lead@asks.co', roles: ['team_leader'], supervisor_id: me.id });
+  const sara = await add({ name: 'Sara', email: 'sara@asks.co', roles: ['employee'], supervisor_id: lead.id });
+  const omar = await add({ name: 'Omar', email: 'omar@asks.co', roles: ['employee'], supervisor_id: me.id });
+  const login = async (email) => { const c = client(); await c('POST', '/api/login', { email, password: 'secret123' }); return c; };
+  const s = await login('sara@asks.co');
+  const o = await login('omar@asks.co');
+
+  // Sara sees everyone in her company to ask, even outside her chain.
+  const names = (await s('GET', '/api/colleagues')).data.colleagues.map((c) => c.name);
+  assert.deepEqual(names.sort(), ['Asks Owner', 'Lead', 'Omar']);
+  assert.equal((await s('POST', '/api/work-requests', { recipient_id: sara.id, title: 'x' })).status, 400, 'not to oneself');
+  const foreign = (await client()('POST', '/api/signup', { company_name: 'Other', name: 'X', email: 'x@other.co', password: 'secret123' })).data.user;
+  assert.equal((await s('POST', '/api/work-requests', { recipient_id: foreign.id, title: 'x' })).status, 400, 'not outside the company');
+
+  const due = new Date(Date.now() + 2 * 864e5).toISOString();
+  const sent = await s('POST', '/api/work-requests', { recipient_id: omar.id, title: 'Design the banner', details: 'For the launch', priority: 'high', due_at: due });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  const id = sent.data.request.id;
+  assert.equal((await o('GET', '/api/notifications')).data.pending_asks, 1);
+  assert.equal((await o('GET', '/api/work-requests?box=inbox')).data.requests[0].title, 'Design the banner');
+  assert.equal((await boss('GET', `/api/work-requests/${id}`)).status, 404, 'private to the two people');
+  assert.equal((await s('POST', `/api/work-requests/${id}/accept`, {})).status, 403, 'only the person asked takes it on');
+
+  // Omar takes it on: it becomes his task, with the request's details, and Sara can follow it.
+  const accepted = await o('POST', `/api/work-requests/${id}/accept`, { deadline: due });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.data));
+  const task = accepted.data.task;
+  assert.equal(task.assignee_id, omar.id);
+  assert.equal(task.title, 'Design the banner');
+  assert.equal(task.priority, 'high');
+  assert.equal(accepted.data.request.status, 'accepted');
+  assert.equal((await o('POST', `/api/work-requests/${id}/accept`, {})).status, 400, 'only once');
+  const followed = await s('GET', `/api/tasks/${task.id}`);
+  assert.equal(followed.status, 200, 'the requester follows the task');
+  assert.equal((await s('POST', `/api/tasks/${task.id}/status`, { status: 'done' })).status, 403, 'but does not run it');
+  await o('POST', `/api/tasks/${task.id}/status`, { status: 'done' });
+  const notes = (await s('GET', '/api/notifications')).data.notifications.map((n) => n.message);
+  assert.ok(notes.some((m) => m.includes('قبل Omar')), 'told when it was taken on');
+  assert.ok(notes.some((m) => m.includes('مكتملة')), 'and when it is done');
+  assert.equal((await s('GET', '/api/work-requests?box=sent')).data.requests[0].task_status, 'done');
+
+  // Declining needs a reason; the sender may cancel while it is pending.
+  const second = (await s('POST', '/api/work-requests', { recipient_id: lead.id, title: 'Review copy' })).data.request;
+  const l = await login('lead@asks.co');
+  assert.equal((await l('POST', `/api/work-requests/${second.id}/decline`, {})).status, 400);
+  const declined = await l('POST', `/api/work-requests/${second.id}/decline`, { note: 'Busy this week' });
+  assert.equal(declined.data.request.status, 'declined');
+  const third = (await s('POST', '/api/work-requests', { recipient_id: me.id, title: 'Approve budget' })).data.request;
+  assert.equal((await s('POST', `/api/work-requests/${third.id}/cancel`)).data.request.status, 'cancelled');
+  assert.equal((await boss('POST', `/api/work-requests/${third.id}/accept`, {})).status, 400);
+
+  // Taken on under one of the recipient's projects.
+  const proj = (await o('POST', '/api/projects', { name: 'Omar project' })).data.project;
+  const fourth = (await s('POST', '/api/work-requests', { recipient_id: omar.id, title: 'Print flyers' })).data.request;
+  const inProject = await o('POST', `/api/work-requests/${fourth.id}/accept`, { project_id: proj.id });
+  assert.equal(inProject.data.task.project_id, proj.id);
+});

@@ -163,7 +163,11 @@ async function loadTask(db, user, taskId) {
   const task = await db.get('SELECT * FROM tasks WHERE id = ?', taskId);
   if (!task) throw new HttpError(404, 'المهمة غير موجودة');
   const project = await db.get('SELECT * FROM projects WHERE id = ?', task.project_id);
-  if (!(await canSeeProject(db, user, project))) throw new HttpError(404, 'المهمة غير موجودة');
+  // Whoever asked for the task (a colleague's request) follows it too.
+  if (!(await canSeeProject(db, user, project))
+    && !(await db.get('SELECT 1 FROM work_requests WHERE task_id = ? AND sender_id = ?', task.id, user.id))) {
+    throw new HttpError(404, 'المهمة غير موجودة');
+  }
   return { task, project };
 }
 
@@ -182,6 +186,7 @@ async function canUpdateTaskStatus(db, user, task) {
 async function purgeTasks(db, taskIdsSql, ...args) {
   const inTasks = `IN (${taskIdsSql})`;
   await db.run(`UPDATE reports SET task_id = NULL WHERE task_id ${inTasks}`, ...args);
+  await db.run(`UPDATE work_requests SET task_id = NULL WHERE task_id ${inTasks}`, ...args);
   await db.run(`DELETE FROM attachments WHERE task_id ${inTasks}`, ...args);
   await db.run(`DELETE FROM requirements WHERE task_id ${inTasks}`, ...args);
   await db.run(`DELETE FROM task_status_history WHERE task_id ${inTasks}`, ...args);
