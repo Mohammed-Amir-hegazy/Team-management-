@@ -238,11 +238,12 @@ async function enterApp() {
 }
 
 // Profile photos of the people I can see, so every avatar can show one.
+// Photos and genders of everyone in the company, so every avatar and message can use them.
 async function loadPhotos() {
   rememberPhotos([state.me]);
   try {
-    rememberPhotos((await api('GET', '/api/users')).users);
-  } catch { /* initials until the people list can be read */ }
+    rememberPhotos((await api('GET', '/api/colleagues')).colleagues);
+  } catch { /* initials and both wording forms until the list can be read */ }
 }
 
 // A square crop from the middle of the picture, small enough for an avatar.
@@ -530,6 +531,7 @@ function accountSheet() {
     try {
       const { user } = await api('PATCH', '/api/me', { gender: e.target.value });
       state.me.gender = user.gender;
+      state.genders.set(state.me.id, user.gender);
       toast('تم الحفظ');
     } catch (err) {
       toast(err.message, { error: true });

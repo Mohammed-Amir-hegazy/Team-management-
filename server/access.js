@@ -102,6 +102,13 @@ function byGender(user, male, female) {
   return user && user.gender === 'female' ? female : male;
 }
 
+// "الزميل كريم" / "الزميلة سارة"; just the name when the gender is not set.
+function colleagueName(user) {
+  if (user.gender === 'female') return `الزميلة ${user.name}`;
+  if (user.gender === 'male') return `الزميل ${user.name}`;
+  return user.name;
+}
+
 async function requireSupervisor(db, user) {
   if (!user.supervisor_id) {
     throw new HttpError(400, 'لا يوجد مسؤول مباشر أعلى منك لإرسال هذا إليه');
@@ -264,6 +271,7 @@ function publicUser(user) {
 module.exports = {
   chooseManager,
   byGender,
+  colleagueName,
   ORG_ROLES,
   ROLES,
   ROLE_LABELS,

@@ -1,7 +1,7 @@
 import {
   state, $, $$, esc, icon, mark, api, render, setTitle, setFab, toast, openModal,
   STATUS_LABELS, STATUSES, PRIORITY_LABELS, ROLE_LABELS, statusPill, avatar, tabs, onTabs, remember, relTime,
-  fmtDateTime, fmtDate, deadlineInfo, emptyState, stackBar, plural, TASKS_N, managerPicker,
+  fmtDateTime, fmtDate, deadlineInfo, emptyState, stackBar, plural, TASKS_N, managerPicker, colleagueTitle, honorific,
 } from '../core.js';
 import { uploadImages, pickImages, gallery, bindGallery, thumb, progressBar } from '../uploads.js';
 import { openWhatsApp, reportMessage } from '../whatsapp.js';
@@ -66,9 +66,9 @@ export function reportDocHtml(r, f = null, brand = currentBrand()) {
       <div class="sub">رقم التقرير ${r.id} · ${esc(fmtDateTime(r.created_at))}</div>
     </header>
     <div class="rd-meta">
-      <div><div class="k">مقدَّم من</div><div class="v">${avatar(r.sender_name, r.sender_id, 'sm')}${esc(r.sender_name)}</div>
+      <div><div class="k">مقدَّم من</div><div class="v">${avatar(r.sender_name, r.sender_id, 'sm')}${esc(colleagueTitle({ id: r.sender_id, name: r.sender_name }))}</div>
         <div class="muted small">${esc(r.sender_job_title || '')}</div></div>
-      <div><div class="k">مرفوع إلى</div><div class="v">${avatar(r.recipient_name, r.recipient_id, 'sm')}${esc(r.recipient_name)}</div></div>
+      <div><div class="k">مرفوع إلى</div><div class="v">${avatar(r.recipient_name, r.recipient_id, 'sm')}${esc(honorific({ id: r.recipient_id, name: r.recipient_name }))}</div></div>
       <div><div class="k">النطاق</div><div class="v">${esc(scope)}</div></div>
       <div><div class="k">حالة التقرير</div><div class="v">${r.reply ? 'تم الرد عليه' : r.read_at ? 'تم الاطلاع عليه' : 'لم يُطّلع عليه بعد'}</div></div>
     </div>

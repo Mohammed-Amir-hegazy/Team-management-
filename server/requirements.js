@@ -4,7 +4,7 @@
 
 const { HttpError } = require('./http');
 const { now } = require('./db');
-const { chooseManager, notify, byGender } = require('./access');
+const { chooseManager, notify, byGender, colleagueName } = require('./access');
 
 async function sendRequirements(db, user, { project, task = null, note = '', recipientId = null }) {
   const supervisor = await chooseManager(db, user, recipientId);
@@ -24,7 +24,7 @@ async function sendRequirements(db, user, { project, task = null, note = '', rec
     const ph = drafts.map(() => '?').join(',');
     await tx.run(`UPDATE requirements SET request_id = ? WHERE id IN (${ph})`, id, ...drafts.map((d) => d.id));
     const what = task ? `المهمة «${task.title}»` : `مشروع «${project.name}»`;
-    await notify(tx, supervisor.id, 'request', `${byGender(user, 'أرسل', 'أرسلت')} ${user.name} ${drafts.length} من المتطلبات الخاصة بـ${what}`, `#/requests/${id}`);
+    await notify(tx, supervisor.id, 'request', `${byGender(user, 'أرسل', 'أرسلت')} ${colleagueName(user)} ${drafts.length} من المتطلبات الخاصة بـ${what}`, `#/requests/${id}`);
     return { request_id: id, count: drafts.length };
   });
 }

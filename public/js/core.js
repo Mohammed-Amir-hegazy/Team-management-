@@ -1,6 +1,6 @@
 // Shared state, formatting, API access and UI building blocks.
 
-export const state = { me: null, config: { otp: {}, uploads: false }, lastNotificationId: 0, pollTimer: null, counts: {}, photos: new Map() };
+export const state = { me: null, config: { otp: {}, uploads: false }, lastNotificationId: 0, pollTimer: null, counts: {}, photos: new Map(), genders: new Map() };
 
 export const ROLE_LABELS = {
   owner: 'صاحب الشركة', admin: 'مسؤول النظام', manager: 'مدير', team_leader: 'قائد فريق', employee: 'موظف',
@@ -279,12 +279,32 @@ export async function busy(button, fn) {
 
 const AVATAR_COLORS = ['#5146E1', '#06044B', '#1FA35C', '#7B72FF', '#0E7490', '#B4236B', '#C2410C'];
 
-// People's profile photos by id, learnt from the people lists the app loads.
+// People's profile photos and genders by id, learnt from the people lists the app loads.
 export function rememberPhotos(users) {
   for (const u of users || []) {
-    if (!u || !u.id || !('photo_url' in u)) continue;
-    if (u.photo_url) state.photos.set(u.id, u.photo_url); else state.photos.delete(u.id);
+    if (!u || !u.id) continue;
+    if ('photo_url' in u) {
+      if (u.photo_url) state.photos.set(u.id, u.photo_url); else state.photos.delete(u.id);
+    }
+    if (u.gender !== undefined) state.genders.set(u.id, u.gender);
   }
+}
+
+// A person's gender, from the object itself or from what the app has learnt about them ('' if unknown).
+export function genderOf(person) {
+  return (person && (person.gender || state.genders.get(Number(person.id)))) || '';
+}
+
+// "الأستاذ …" / "الأستاذة …" for someone higher up (both forms when the gender is not set).
+export function honorific(person) {
+  const title = { male: 'الأستاذ', female: 'الأستاذة' }[genderOf(person)] || 'الأستاذ/ة';
+  return `${title} ${person.name}`;
+}
+
+// "الزميل كريم" / "الزميلة سارة" (both forms when the gender is not set).
+export function colleagueTitle(person) {
+  const title = { male: 'الزميل', female: 'الزميلة' }[genderOf(person)] || 'الزميل/ة';
+  return `${title} ${person.name}`;
 }
 
 // A person's photo, or their initials on their colour when they have none.

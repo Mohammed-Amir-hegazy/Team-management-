@@ -423,4 +423,13 @@ test('each person has a gender that shapes the wording of messages', async () =>
   const note = (await k('GET', '/api/notifications')).data.notifications[0].message;
   assert.match(note, /^أسندت إليك منى/);
   assert.equal((await k('GET', '/api/me')).data.user.chain.find((c) => c.id === me.id).gender, 'female');
+
+  // Reports and requests name the sender as «الزميل …» / «الزميلة …».
+  await k('POST', '/api/reports', { title: 'تقرير اليوم', body: 'x' });
+  const ownerNotes = (await a('GET', '/api/notifications')).data.notifications.map((n) => n.message);
+  assert.ok(ownerNotes.some((m) => m.startsWith('تقرير جديد من الزميل كريم')), ownerNotes.join(' | '));
+  await boss('PATCH', `/api/users/${admin.id}`, { gender: 'female' });
+  await a('POST', '/api/work-requests', { recipient_id: emp.id, title: 'ملف' });
+  const empNotes = (await k('GET', '/api/notifications')).data.notifications.map((n) => n.message);
+  assert.ok(empNotes.some((m) => m.startsWith('طلبت منك الزميلة Admin')), empNotes.join(' | '));
 });

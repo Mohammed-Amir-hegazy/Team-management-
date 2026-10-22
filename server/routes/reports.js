@@ -5,7 +5,7 @@ const { now } = require('../db');
 const v = require('../validate');
 const {
   requireSupervisor, subordinateIds, loadProject, loadTask, notify, publicUser, roleRank,
-  chooseManager, byGender,
+  chooseManager, byGender, colleagueName,
 } = require('../access');
 const {
   TASK_FIELDS, TASK_FROM, placeholders, markOverdue, summarize, memberStats, workSnapshot, EMPTY_STATS,
@@ -108,7 +108,7 @@ module.exports = function register(router) {
         await tx.run(`INSERT INTO attachments (report_id, uploaded_by, url, public_id, width, height, created_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)`, r.lastInsertRowid, user.id, img.url, img.public_id, img.width, img.height, now());
       }
-      await notify(tx, supervisor.id, 'report', `تقرير جديد من ${user.name}: «${title}»`, `#/reports/${r.lastInsertRowid}`);
+      await notify(tx, supervisor.id, 'report', `تقرير جديد من ${colleagueName(user)}: «${title}»`, `#/reports/${r.lastInsertRowid}`);
       return r.lastInsertRowid;
     });
     return { report: parseSnapshot(await db.get(`${REPORT_SQL} WHERE r.id = ?`, id)) };

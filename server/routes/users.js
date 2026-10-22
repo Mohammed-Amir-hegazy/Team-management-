@@ -6,6 +6,7 @@ const v = require('../validate');
 const auth = require('../auth');
 const {
   ROLES, roleRank, userRoles, isAdmin, primaryRole, getUser, subordinateIds, ancestorIds, publicUser, notify,
+  colleagueName,
 } = require('../access');
 const { normalizePhone, maskPhone } = require('../phone');
 const { assertDeletable, deleteAccount, deleteCompany, liveCompanyUsers } = require('../accounts');
@@ -347,7 +348,7 @@ module.exports = function register(router) {
     const recent = await db.get(`SELECT 1 FROM notifications WHERE user_id = ? AND type = 'nudge' AND link = ? AND created_at > ?`,
       target.id, `#/people?from=${user.id}`, new Date(Date.now() - 10 * 60 * 1000).toISOString());
     if (recent) throw new HttpError(429, 'أُرسل تذكير لهذا الشخص قبل قليل؛ يُرجى الانتظار عشر دقائق');
-    await notify(db, target.id, 'nudge', `🔔 تذكير من ${user.name}: ${message}`, `#/people?from=${user.id}`);
+    await notify(db, target.id, 'nudge', `🔔 تذكير من ${colleagueName(user)}: ${message}`, `#/people?from=${user.id}`);
     return { ok: true };
   });
 

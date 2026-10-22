@@ -50,7 +50,7 @@ function sampleReport() {
   return {
     id: 128, title: 'تقرير حالة العمل الأسبوعي', body: 'تم الانتهاء من المرحلة الأولى، والعمل جارٍ على المرحلة الثانية وفق الخطة.',
     created_at: now, sender_id: me.id, sender_name: me.name, sender_job_title: me.job_title,
-    recipient_id: 0, recipient_name: me.supervisor_name || 'المسؤول المباشر', read_at: now, images: [],
+    recipient_id: me.supervisor_id || 0, recipient_name: me.supervisor_name || 'المسؤول المباشر', read_at: now, images: [],
     snapshot: {
       generated_at: now,
       summary: { total: 12, todo: 2, in_progress: 5, review: 1, blocked: 1, done: 3, overdue: 1 },

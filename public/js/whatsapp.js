@@ -2,7 +2,8 @@
 // formal address and closing; writing downward (to one's team) uses a collegial, direct tone.
 
 import {
-  state, $, esc, icon, toast, openModal, STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N, DAYS_N,
+  state, $, esc, icon, toast, openModal, genderOf, colleagueTitle,
+  STATUS_LABELS, PRIORITY_LABELS, fmtDate, fmtDateTime, plural, TASKS_N, ITEMS_N, DAYS_N,
 } from './core.js';
 
 // Without a number WhatsApp opens its contact picker.
@@ -70,14 +71,15 @@ const appLink = (hash) => `${location.origin}/${hash}`;
 
 // Formal address that follows the recipient's gender (both forms when it is not set).
 export function formalTitle(person) {
-  if (person.gender === 'male') return `حضرة الأستاذ ${person.name} المحترم،`;
-  if (person.gender === 'female') return `حضرة الأستاذة ${person.name} المحترمة،`;
+  const gender = genderOf(person);
+  if (gender === 'male') return `حضرة الأستاذ ${person.name} المحترم،`;
+  if (gender === 'female') return `حضرة الأستاذة ${person.name} المحترمة،`;
   return `حضرة الأستاذ/ة ${person.name} المحترم/ة،`;
 }
 
 function salutation(person, relation) {
   if (relation === 'up') return `${formalTitle(person)}\nتحية طيبة وبعد،`;
-  const dear = { male: 'الزميل العزيز', female: 'الزميلة العزيزة' }[person.gender] || 'الزميل/ة العزيز/ة';
+  const dear = { male: 'الزميل العزيز', female: 'الزميلة العزيزة' }[genderOf(person)] || 'الزميل/ة العزيز/ة';
   return `${dear} ${person.name}،\nتحية طيبة،`;
 }
 
@@ -95,7 +97,7 @@ export function reportMessage(report, recipient, relation = 'up') {
   const lines = [salutation(recipient, relation), ''];
   lines.push(report.sender_id === me.id
     ? `أرفع إليكم *${report.title}* بتاريخ ${fmtDate(report.created_at)}.`
-    : `أرفع إليكم *${report.title}* المقدَّم من ${report.sender_name} بتاريخ ${fmtDate(report.created_at)}.`);
+    : `أرفع إليكم *${report.title}* المقدَّم من ${colleagueTitle({ id: report.sender_id, name: report.sender_name })} بتاريخ ${fmtDate(report.created_at)}.`);
   lines.push('', report.body);
   if (s) {
     lines.push('', '*ملخص حالة العمل:*',

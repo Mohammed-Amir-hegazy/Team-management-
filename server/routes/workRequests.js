@@ -8,7 +8,9 @@
 const { HttpError } = require('../http');
 const { now } = require('../db');
 const v = require('../validate');
-const { getUser, notify, loadProject, ancestorIds, byGender } = require('../access');
+const {
+  getUser, notify, loadProject, ancestorIds, byGender, colleagueName,
+} = require('../access');
 const { createTask } = require('./tasks');
 
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -81,7 +83,7 @@ module.exports = function register(router) {
     const id = await db.transaction(async (tx) => {
       const r = await tx.run(`INSERT INTO work_requests (company_id, kind, sender_id, recipient_id, title, details, priority, due_at, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, user.company_id, kind, user.id, recipient.id, title, details, priority, dueAt, now());
-      await notify(tx, recipient.id, 'work_request', `${byGender(user, 'طلب', 'طلبت')} منك ${user.name}: «${title}»`, `#/asks/${r.lastInsertRowid}`);
+      await notify(tx, recipient.id, 'work_request', `${byGender(user, 'طلب', 'طلبت')} منك ${colleagueName(user)}: «${title}»`, `#/asks/${r.lastInsertRowid}`);
       return r.lastInsertRowid;
     });
     return { request: await loadRequest(db, user, id) };
