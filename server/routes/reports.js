@@ -5,6 +5,7 @@ const { now } = require('../db');
 const v = require('../validate');
 const {
   requireSupervisor, subordinateIds, loadProject, loadTask, notify, publicUser, roleRank,
+  chooseManager, byGender,
 } = require('../access');
 const {
   TASK_FIELDS, TASK_FROM, placeholders, markOverdue, summarize, memberStats, workSnapshot, EMPTY_STATS,
@@ -85,12 +86,9 @@ module.exports = function register(router) {
     return { snapshot: await workSnapshot(db, user, { projectId, taskId }) };
   });
 
-  // The recipient is always the sender's direct supervisor: no level can be skipped.
+  // To any manager above the sender (the direct supervisor unless another is chosen).
   router.post('/api/reports', async ({ db, user, body, config }) => {
-    const supervisor = await requireSupervisor(db, user);
-    if (body.recipient_id !== undefined && body.recipient_id !== null && Number(body.recipient_id) !== supervisor.id) {
-      throw new HttpError(403, 'تُرسل التقارير إلى المسؤول المباشر فقط');
-    }
+    const supervisor = await chooseManager(db, user, body.recipient_id);
     const title = v.text(body.title, 'عنوان التقرير', { max: 300 });
     const text = v.text(body.body, 'نص التقرير', { max: 20000 });
     let projectId = v.optionalId(body.project_id, 'المشروع');
@@ -142,15 +140,15 @@ module.exports = function register(router) {
     if (report.reply) throw new HttpError(400, 'تم الرد على هذا التقرير مسبقًا');
     const reply = v.text(body.reply, 'الرد', { max: 10000 });
     await db.run('UPDATE reports SET reply = ?, replied_at = ? WHERE id = ?', reply, now(), report.id);
-    await notify(db, report.sender_id, 'report_reply', `ردّ ${user.name} على تقريرك «${report.title}»`, `#/reports/${report.id}`);
+    await notify(db, report.sender_id, 'report_reply', `${byGender(user, 'ردّ', 'ردّت')} ${user.name} على تقريرك «${report.title}»`, `#/reports/${report.id}`);
     return { ok: true };
   });
 
-  // Passing a report one level up, with the forwarder's own comment on top.
+  // Passing a report up to any manager above, with the forwarder's own comment on top.
   router.post('/api/reports/:id/forward', async ({ db, user, params, body }) => {
     const report = await loadReport(db, user, v.id(params.id, 'التقرير'));
     if (report.recipient_id !== user.id) throw new HttpError(403, NOT_ALLOWED);
-    const supervisor = await requireSupervisor(db, user);
+    const supervisor = await chooseManager(db, user, body.recipient_id);
     const note = v.text(body.note, 'الملاحظة', { required: false, max: 10000 });
     const title = `إحالة: ${report.title}`.slice(0, 300);
     const text = note || `تقرير مُحال من ${report.sender_name}`;
@@ -159,7 +157,7 @@ module.exports = function register(router) {
         INSERT INTO reports (sender_id, recipient_id, title, body, project_id, task_id, forwarded_from_id, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `, user.id, supervisor.id, title, text, report.project_id, report.task_id, report.id, now());
-      await notify(tx, supervisor.id, 'report', `أحال إليك ${user.name} تقريرًا من ${report.sender_name}`, `#/reports/${r.lastInsertRowid}`);
+      await notify(tx, supervisor.id, 'report', `${byGender(user, 'أحال', 'أحالت')} إليك ${user.name} تقريرًا من ${report.sender_name}`, `#/reports/${r.lastInsertRowid}`);
       return r.lastInsertRowid;
     });
     return { report_id: id };

@@ -3,7 +3,9 @@
 const { HttpError } = require('../http');
 const { now } = require('../db');
 const v = require('../validate');
-const { requireSupervisor, subordinateIds, notify } = require('../access');
+const {
+  requireSupervisor, subordinateIds, notify, byGender,
+} = require('../access');
 
 // Items always hang off the original request of a forwarding chain: COALESCE(root_id, id).
 const REQUEST_SQL = `
@@ -87,7 +89,7 @@ module.exports = function register(router) {
         decision, note, now(), rootOf(request));
       for (const link of chain) {
         await notify(tx, link.sender_id, 'request_response',
-          `قام ${user.name} ${label} طلبك${note ? `: ${note}` : ''}`, `#/requests/${link.id}`);
+          `${byGender(user, 'قام', 'قامت')} ${user.name} ${label} طلبك${note ? `: ${note}` : ''}`, `#/requests/${link.id}`);
       }
     });
     return { ok: true };
@@ -104,7 +106,7 @@ module.exports = function register(router) {
       request.recipient_id, link, new Date(Date.now() - 30 * 60 * 1000).toISOString());
     if (recent) throw new HttpError(429, 'أُرسل تذكير بهذا الطلب قبل قليل؛ يُرجى الانتظار نصف ساعة');
     await notify(db, request.recipient_id, 'nudge',
-      `🔔 يذكّركم ${user.name} بطلب المتطلبات المرسل بانتظار ردّكم${message ? `: ${message}` : ''}`, link);
+      `🔔 ${byGender(user, 'يذكّركم', 'تذكّركم')} ${user.name} بطلب المتطلبات المرسل بانتظار ردّكم${message ? `: ${message}` : ''}`, link);
     return { ok: true };
   });
 
@@ -122,8 +124,8 @@ module.exports = function register(router) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, user.id, supervisor.id, request.scope, request.project_id, request.task_id, note, request.id, rootOf(request), now());
       await tx.run("UPDATE requests SET status = 'forwarded' WHERE id = ?", request.id);
-      await notify(tx, supervisor.id, 'request', `أحال إليك ${user.name} طلبًا مقدَّمًا من ${request.sender_name}`, `#/requests/${r.lastInsertRowid}`);
-      await notify(tx, request.sender_id, 'request_response', `أحال ${user.name} طلبك إلى ${supervisor.name}`, `#/requests/${request.id}`);
+      await notify(tx, supervisor.id, 'request', `${byGender(user, 'أحال', 'أحالت')} إليك ${user.name} طلبًا مقدَّمًا من ${request.sender_name}`, `#/requests/${r.lastInsertRowid}`);
+      await notify(tx, request.sender_id, 'request_response', `${byGender(user, 'أحال', 'أحالت')} ${user.name} طلبك إلى ${supervisor.name}`, `#/requests/${request.id}`);
       return r.lastInsertRowid;
     });
     return { request_id: id };

@@ -2,7 +2,7 @@
 
 import {
   state, $, $$, esc, icon, mark, api, toast, openModal, formData, avatar, loader, setFab,
-  ROLE_LABELS, busy, creatorFields, bindCreatorFields, rememberPhotos,
+  ROLE_LABELS, busy, creatorFields, bindCreatorFields, rememberPhotos, genderField,
 } from './core.js';
 import { viewDashboard } from './views/dashboard.js';
 import { viewProjects, viewProject } from './views/projects.js';
@@ -17,6 +17,7 @@ import { viewSubscription, subscriptionBanner } from './views/subscription.js';
 import { themeButton, themeSwitch } from './theme.js';
 import { viewBrand } from './views/brand.js';
 import { viewAsks } from './views/asks.js';
+import { viewUpdates, showWhatsNew } from './views/updates.js';
 
 const ALARM_TYPES = new Set(['reminder', 'overdue', 'nudge', 'subscription']);
 
@@ -82,6 +83,7 @@ async function showAuth() {
             <div class="field"><label for="f-title">المسمى الوظيفي</label><input id="f-title" name="job_title" placeholder="مثال: المدير التنفيذي"></div>
             <div class="field"><label for="f-phone">رقم واتساب</label><input id="f-phone" name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
           </div>
+          ${genderField()}
           ${creatorFields('f')}` : ''}
         <div class="field"><label for="f-email">البريد الإلكتروني</label>
           <div class="input-icon">${icon('user')}<input id="f-email" name="email" type="email" required autocomplete="username" dir="ltr"></div></div>
@@ -132,7 +134,10 @@ function showSignup() {
         <div class="field"><label>اسمك الكامل</label><input name="name" required autocomplete="name"></div>
         <div class="field"><label>المسمى الوظيفي</label><input name="job_title" placeholder="مثال: المدير العام"></div>
       </div>
-      <div class="field"><label>رقم واتساب</label><input name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
+      <div class="fields">
+        <div class="field"><label>رقم واتساب</label><input name="phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
+        ${genderField()}
+      </div>
       ${creatorFields('s')}
       <div class="field"><label>البريد الإلكتروني</label><div class="input-icon">${icon('user')}<input name="email" type="email" required dir="ltr" autocomplete="username"></div></div>
       ${passwordField('s-pass', 'password', 'new-password')}
@@ -364,7 +369,6 @@ function navItems() {
     ['tasks', 'المهام', 'tasks'],
     ['reports', 'التقارير', 'report', 'reports'],
     ['requests', 'الطلبات', 'box', 'requests'],
-    ['asks', 'طلبات الزملاء', 'send', 'asks'],
     me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
     ['people', me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users'],
     ['notifications', 'الإشعارات', 'bell', 'notifications'],
@@ -403,6 +407,8 @@ function showApp() {
   if (!location.hash || location.hash === '#/') location.hash = '#/dashboard';
   route();
   startPolling();
+  // After an update, its news (and any steps for admins) opens once.
+  setTimeout(showWhatsNew, 1200);
 }
 
 function sheetItem(href, label, ic, extra = '') {
@@ -417,13 +423,13 @@ function moreSheet() {
     className: 'menu-sheet',
     body: `<div class="list">
       ${sheetItem('#/requests', 'الطلبات', 'box', badge(c.requests))}
-      ${sheetItem('#/asks', 'طلبات الزملاء', 'send', badge(c.asks))}
       ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
       ${sheetItem('#/people', state.me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users')}
       ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
       ${state.me.is_admin ? sheetItem('#/brand', 'هوية الشركة', 'palette') : ''}
       ${state.me.is_admin ? sheetItem('#/subscription', 'الاشتراك', 'shield') : ''}
       ${state.me.is_platform ? sheetItem('#/platform', 'لوحة إدارة المنصة', 'layers') : ''}
+      ${sheetItem('#/updates', 'ما الجديد في المنصة', 'bolt')}
       <a class="item link" href="#" data-account>${icon('user')}<span class="grow">حسابي</span></a>
       <a class="item link" href="#" data-logout>${icon('logout')}<span class="grow">تسجيل الخروج</span></a>
     </div>`,
@@ -458,6 +464,10 @@ function accountSheet() {
       </div>
       <h3>المظهر</h3>
       <div style="margin-bottom:1.2rem">${themeSwitch()}</div>
+      <h3>النوع</h3>
+      <div class="inline-form" style="margin-bottom:1.2rem">
+        ${genderField(me.gender, { name: 'my_gender', label: '' }).replace('<label></label>', '')}
+        <span class="hint" style="align-self:center">لمخاطبتك بالصيغة الصحيحة في الرسائل</span></div>
       <h3>رقم واتساب</h3>
       <div class="inline-form" style="margin-bottom:1.2rem">
         <div class="field"><input name="phone" type="tel" dir="ltr" value="${esc(me.phone ? `+${me.phone}` : '')}" placeholder="2010xxxxxxxx+"></div>
@@ -516,6 +526,15 @@ function accountSheet() {
     toast('تم حذف صورتك');
   }).then(syncPhotoButtons));
   $('[data-delete-account]', el).addEventListener('click', () => { el.remove(); deleteMyAccount(); });
+  $('[name=my_gender]', el).addEventListener('change', async (e) => {
+    try {
+      const { user } = await api('PATCH', '/api/me', { gender: e.target.value });
+      state.me.gender = user.gender;
+      toast('تم الحفظ');
+    } catch (err) {
+      toast(err.message, { error: true });
+    }
+  });
   $('[data-save-phone]', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
     const { user } = await api('PATCH', '/api/me', { phone: $('[name=phone]', el).value });
     state.me = { ...state.me, phone: user.phone };
@@ -563,6 +582,7 @@ const routes = {
   reports: (p) => (p.id ? viewReport(p) : viewReports(p)),
   requests: (p) => (p.id ? viewRequest(p) : viewRequests(p)),
   asks: viewAsks,
+  updates: viewUpdates,
   team: viewTeam,
   people: viewPeople,
   notifications: viewNotifications,
@@ -593,7 +613,9 @@ export async function route() {
       return;
     }
   }
-  $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === key));
+  // A request's own page belongs to «الطلبات».
+  const navKey = key === 'asks' ? 'requests' : key;
+  $$('[data-nav]').forEach((a) => a.classList.toggle('active', a.dataset.nav === navKey));
   $$('.modal-backdrop').forEach((m) => m.remove());
   setFab(null);
   const view = $('#view');
@@ -639,8 +661,7 @@ async function pollNotifications() {
     const data = await api('GET', '/api/notifications');
     setCount('notifications', data.unread);
     setCount('reports', data.unread_reports);
-    setCount('requests', data.pending_requests);
-    setCount('asks', data.pending_asks);
+    setCount('requests', data.pending_requests + data.pending_asks);
     setCount('more', data.unread + data.pending_requests + data.pending_asks);
     const dot = $('#bell-dot');
     if (dot) dot.classList.toggle('hidden', !data.unread);

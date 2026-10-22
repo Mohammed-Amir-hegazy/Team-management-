@@ -160,6 +160,6 @@ module.exports = function register(router) {
   router.post('/api/projects/:id/requirements/send', async ({ db, user, params, body }) => {
     const project = await loadProject(db, user, v.id(params.id, 'المشروع'));
     const note = v.text(body.note, 'الملاحظة', { required: false, max: 2000 });
-    return sendRequirements(db, user, { project, note });
+    return sendRequirements(db, user, { project, note, recipientId: body.recipient_id });
   });
 };

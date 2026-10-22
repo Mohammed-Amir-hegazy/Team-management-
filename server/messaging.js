@@ -48,7 +48,7 @@ function noticeEmail({ name, subject, text }) {
         <span style="display:block;color:#62E98A;font-size:12px">software solutions</span></td></tr>
       <tr><td style="padding:28px;color:#0B0A3A;text-align:right">
         <p style="margin:0 0 12px;font-size:16px">${esc(name)}، تحية طيبة،</p>
-        <p style="margin:0;font-size:15px;line-height:1.9">${esc(text)}</p></td></tr>
+        <p style="margin:0;font-size:15px;line-height:1.9;white-space:pre-line">${esc(text)}</p></td></tr>
       <tr><td style="background:#F7F7FD;padding:14px 28px;font-size:12px;color:#6E6C93;text-align:center">منصة ابتكار لإدارة الأعمال — Ebtikar Software Solutions</td></tr>
     </table></td></tr></table></body></html>`;
   return { subject, html, text: `${name}، تحية طيبة،\n${text}` };

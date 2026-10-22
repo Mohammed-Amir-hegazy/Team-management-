@@ -170,6 +170,12 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Platform updates already announced to the companies (see releases.js).
+CREATE TABLE IF NOT EXISTS release_notices (
+  id      TEXT PRIMARY KEY,
+  sent_at TEXT NOT NULL
+);
+
 -- A request from one person to any colleague in the company; the colleague can take it on as a task
 -- of their own (task_id) or decline it with a reason.
 CREATE TABLE IF NOT EXISTS work_requests (
@@ -333,6 +339,10 @@ const ADDED_COLUMNS = [
   ['users', 'deleted_at', 'TEXT'],
   ['projects', 'company_id', 'INTEGER REFERENCES companies(id)'],
   ['users', 'photo_version', 'INTEGER NOT NULL DEFAULT 0'],
+  // 'colleague': anyone in the company; 'manager': someone above the sender, who can also approve it.
+  ['work_requests', 'kind', "TEXT NOT NULL DEFAULT 'colleague'"],
+  // 'male' / 'female', for addressing people correctly in messages; '' until set.
+  ['users', 'gender', "TEXT NOT NULL DEFAULT ''"],
 ];
 
 async function migrate(db) {

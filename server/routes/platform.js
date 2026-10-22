@@ -36,7 +36,9 @@ async function withOwner(db, c) {
     plan_label: PLAN_LABELS[c.plan],
     ...accessOf(c),
     // The company's contact: its owner, or the system admin who registered it while there is no owner.
-    owner: owner ? { id: owner.id, name: owner.name, email: owner.email, phone: owner.phone, is_owner: owner.role === 'owner' } : null,
+    owner: owner ? {
+      id: owner.id, name: owner.name, email: owner.email, phone: owner.phone, gender: owner.gender || '', is_owner: owner.role === 'owner',
+    } : null,
   };
 }
 
@@ -104,10 +106,11 @@ module.exports = function register(router) {
     const id = await db.transaction(async (tx) => {
       const companyId = await createCompany(tx, { name, plan, seats, days, years, userId: user.id });
       await tx.run(`
-        INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, supervisor_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+        INSERT INTO users (name, email, password_hash, role, roles, job_title, gender, phone, company_id, supervisor_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
       `, ownerName, email, auth.hashPassword(password), level, roles.join(','),
-      v.text(body.owner_job_title, 'المسمى الوظيفي', { required: false, max: 120 }), phone, companyId, now());
+      v.text(body.owner_job_title, 'المسمى الوظيفي', { required: false, max: 120 }),
+      v.oneOf(body.owner_gender || '', ['', 'male', 'female'], 'النوع'), phone, companyId, now());
       return companyId;
     });
     return { company: await withOwner(db, await loadCompany(db, id)) };

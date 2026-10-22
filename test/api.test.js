@@ -184,16 +184,20 @@ test('task status with a reason', async () => {
   assert.equal((await employee('PATCH', `/api/tasks/${task.id}`, { reminder_at: null })).status, 200);
 });
 
-test('reports only go to the direct supervisor', async () => {
-  const skip = await employee('POST', '/api/reports', { title: 'Hi', body: 'skip', recipient_id: people.manager.id });
-  assert.equal(skip.status, 403);
+test('reports go to the direct supervisor or any manager above, never outside the chain', async () => {
+  const outside = await employee('POST', '/api/reports', { title: 'Hi', body: 'x', recipient_id: people.otherLeader.id });
+  assert.equal(outside.status, 403);
+  const up = await employee('POST', '/api/reports', { title: 'Escalation', body: 'Straight to the manager', recipient_id: people.manager.id });
+  assert.equal(up.status, 200, JSON.stringify(up.data));
+  assert.equal(up.data.report.recipient_id, people.manager.id);
+  assert.equal((await manager('GET', '/api/reports')).data.reports.length, 1);
 
   const ok = await employee('POST', '/api/reports', { title: 'Weekly', body: 'Done 3 pages', task_id: task.id });
   assert.equal(ok.status, 200);
   assert.equal(ok.data.report.recipient_id, people.leader.id);
   const reportId = ok.data.report.id;
 
-  assert.equal((await manager('GET', '/api/reports')).data.reports.length, 0);
+  assert.equal((await manager('GET', '/api/reports')).data.reports.length, 1, 'only the escalated one');
   // Not in the manager's inbox, but readable by them (read-only) since the sender is in their team.
   const managerView = await manager('GET', `/api/reports/${reportId}`);
   assert.equal(managerView.status, 200);

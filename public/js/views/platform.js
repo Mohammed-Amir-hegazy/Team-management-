@@ -3,9 +3,9 @@
 import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal, confirmDialog, busy,
   PLAN_LABELS, PLAN_COLORS, ROLE_LABELS, countdown, periodUsed, fmtDate, fmtDateTime, relTime, kpi, avatar,
-  emptyState, remember, urgency, creatorFields, bindCreatorFields,
+  emptyState, remember, urgency, creatorFields, bindCreatorFields, genderField,
 } from '../core.js';
-import { openWhatsApp, renewalReminderMessage } from '../whatsapp.js';
+import { openWhatsApp, renewalReminderMessage, formalTitle } from '../whatsapp.js';
 import { EVENT_LABELS, seatsMeter } from './subscription.js';
 
 const FILTERS = [
@@ -123,7 +123,10 @@ function newCompanyModal() {
         <div class="field"><label>البريد الإلكتروني</label><input name="owner_email" type="email" dir="ltr" required></div>
         <div class="field"><label>رقم واتساب</label><input name="owner_phone" type="tel" dir="ltr" placeholder="2010xxxxxxxx+"></div>
       </div>
-      <div class="field"><label>كلمة مرور مبدئية</label><input name="owner_password" dir="ltr" required></div>`,
+      <div class="fields">
+        <div class="field"><label>كلمة مرور مبدئية</label><input name="owner_password" dir="ltr" required></div>
+        ${genderField('', { name: 'owner_gender' })}
+      </div>`,
     submitLabel: 'إنشاء الشركة',
     onSubmit: async (d) => {
       const { company } = await api('POST', '/api/platform/companies', { ...d, seats: d.seats || null });
@@ -344,7 +347,7 @@ export async function viewCompany(id) {
   }));
   $$('[data-wa-user]', el).forEach((b) => b.addEventListener('click', () => {
     const u = byId.get(Number(b.dataset.waUser));
-    openWhatsApp(u.phone, `حضرة الأستاذ/ة ${u.name} المحترم/ة،\nتحية طيبة وبعد،\n\n…\n\nمع خالص التحية،\n${state.me.name}\nإدارة منصة ابتكار`);
+    openWhatsApp(u.phone, `${formalTitle(u)}\nتحية طيبة وبعد،\n\n…\n\nمع خالص التحية،\n${state.me.name}\nإدارة منصة ابتكار`);
   }));
   setFab(null);
 }

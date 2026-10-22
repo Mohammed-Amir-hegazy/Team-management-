@@ -1,9 +1,9 @@
 import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal,
-  ROLE_LABELS, ORG_ROLES, avatar, emptyState, rememberPhotos,
+  ROLE_LABELS, ORG_ROLES, avatar, emptyState, rememberPhotos, genderField,
 } from '../core.js';
 import { openReminder } from '../remind.js';
-import { newAskModal } from './asks.js';
+import { newRequestModal } from './asks.js';
 import { openWhatsApp, generalMessage } from '../whatsapp.js';
 
 // Who I may remind: people below me (down) and my supervisor chain (up).
@@ -40,7 +40,7 @@ function personCard(u, admin) {
   </div>`;
 }
 
-export async function viewPeople() {
+export async function viewPeople({ query } = {}) {
   const { users, can_manage_accounts: admin, seats } = await api('GET', '/api/users');
   rememberPhotos(users);
   setTitle(admin ? 'المستخدمين' : 'الهيكل الوظيفي');
@@ -66,6 +66,9 @@ export async function viewPeople() {
       <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة مستخدم</button>` : ''}</div>
     </div>
     ${!admin ? `<div class="callout blue">${icon('shield')}<div>إنشاء الحسابات وتعديل الأدوار من صلاحيات صاحب الشركة ومسؤول النظام.</div></div>` : ''}
+    ${admin && users.some((u) => u.active && !u.gender) ? `<div class="callout amber row wrap">${icon('users')}
+      <div class="grow">لم يُحدَّد النوع (ذكر/أنثى) لـ${users.filter((u) => u.active && !u.gender).length} من المستخدمين؛ يُستخدم لمخاطبة كل شخص بالصيغة الصحيحة في الرسائل.</div>
+      <button class="btn sm" id="set-genders">تحديد النوع</button></div>` : ''}
     ${admin && !users.some((u) => u.role === 'owner' && u.active) ? `<div class="callout amber">${icon('alert')}<div>لم يُضف حساب صاحب الشركة بعد. يمكنك إضافته من «إضافة مستخدم» باختيار دور «صاحب الشركة»، وسيتبعه من هم في قمة الهيكل حاليًا.</div></div>` : ''}
     <div class="toolbar"><div class="input-icon">${icon('search')}<input id="q" type="search" placeholder="ابحث بالاسم أو المسمى الوظيفي"></div></div>
     <section class="card">
@@ -75,7 +78,7 @@ export async function viewPeople() {
 
   const bindEdit = (root) => {
     $$('[data-edit]', root).forEach((b) => b.addEventListener('click', () => userModal(users, byId.get(Number(b.dataset.edit)))));
-    $$('[data-ask]', root).forEach((b) => b.addEventListener('click', () => newAskModal(Number(b.dataset.ask))));
+    $$('[data-ask]', root).forEach((b) => b.addEventListener('click', () => newRequestModal({ recipientId: Number(b.dataset.ask) })));
     $$('[data-remind]', root).forEach((b) => b.addEventListener('click', () => {
       const u = byId.get(Number(b.dataset.remind));
       openReminder({ person: u, relation: relationTo(u) });
@@ -97,6 +100,11 @@ export async function viewPeople() {
     bindEdit(results);
   });
   if (admin) {
+    const genders = $('#set-genders', el);
+    if (genders) {
+      genders.addEventListener('click', () => gendersModal(users));
+      if (query && query.get('genders')) gendersModal(users);
+    }
     const add = () => userModal(users, null);
     $('#add-user', el).addEventListener('click', add);
     setFab('إضافة مستخدم', add);
@@ -142,6 +150,7 @@ function userModal(users, user) {
         <div class="field"><label>البريد الإلكتروني</label><input name="email" type="email" dir="ltr" required value="${esc(editing ? user.email : '')}"></div>
         <div class="field"><label>رقم واتساب <span class="hint">(مع رمز الدولة)</span></label><input name="phone" type="tel" dir="ltr" value="${esc(editing && user.phone ? `+${user.phone}` : '')}" placeholder="2010xxxxxxxx+"></div>
       </div>
+      ${genderField(editing ? user.gender : '')}
       <div class="fields">
         <div class="field"><label>${editing ? 'كلمة مرور جديدة <span class="hint">(اتركها فارغة للإبقاء على الحالية)</span>' : 'كلمة المرور المبدئية'}</label>
           <input name="password" type="text" dir="ltr" ${editing ? '' : 'required'} autocomplete="new-password"></div>
@@ -156,7 +165,7 @@ function userModal(users, user) {
       ${editing && user.id !== state.me.id ? `<label class="switch"><input type="checkbox" name="active" ${user.active ? 'checked' : ''}> الحساب نشط</label>` : ''}`}`,
     submitLabel: editing ? 'حفظ التعديلات' : 'إنشاء الحساب',
     onSubmit: async (d) => {
-      const body = { name: d.name, job_title: d.job_title, email: d.email, phone: d.phone };
+      const body = { name: d.name, job_title: d.job_title, email: d.email, phone: d.phone, gender: d.gender };
       if (d.roles && d.roles.includes('owner')) {
         body.roles = ['owner'];
       } else if (!isOwner) {
@@ -202,4 +211,29 @@ function userModal(users, user) {
   refresh();
   select.addEventListener('change', () => { select.dataset.touched = '1'; });
   $$('input[name=roles]', form).forEach((i) => i.addEventListener('change', refresh));
+}
+
+// All the people whose gender is not set yet, in one sheet.
+function gendersModal(users) {
+  const missing = users.filter((u) => u.active && !u.gender);
+  openModal({
+    title: 'تحديد نوع المستخدمين',
+    wide: true,
+    body: `<p class="muted small" style="margin-top:0">يُستخدم لمخاطبة كل شخص بالصيغة الصحيحة (الأستاذ / الأستاذة …) في الرسائل والإشعارات.</p>
+      <div class="list">${missing.map((u) => `<div class="item">${avatar(u.name, u.id, 'sm')}
+        <span class="grow">${esc(u.name)}<small class="muted" style="display:block">${esc(u.job_title || ROLE_LABELS[u.role])}</small></span>
+        <div class="seg">
+          <label><input type="radio" name="g${u.id}" value="male"><span>ذكر</span></label>
+          <label><input type="radio" name="g${u.id}" value="female"><span>أنثى</span></label>
+        </div></div>`).join('')}</div>`,
+    submitLabel: 'حفظ',
+    onSubmit: async (d) => {
+      const chosen = missing.filter((u) => d[`g${u.id}`]);
+      if (!chosen.length) throw new Error('لم يتم اختيار النوع لأي مستخدم');
+      for (const u of chosen) await api('PATCH', `/api/users/${u.id}`, { gender: d[`g${u.id}`] });
+      toast(`تم حفظ النوع لـ${chosen.length} من المستخدمين`);
+      if (location.hash.includes('genders')) location.hash = '#/people';
+      else window.dispatchEvent(new Event('refresh-view'));
+    },
+  });
 }

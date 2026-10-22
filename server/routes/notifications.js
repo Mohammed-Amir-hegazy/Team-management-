@@ -2,14 +2,19 @@
 
 const { now } = require('../db');
 const v = require('../validate');
-const { subordinateIds } = require('../access');
+const { subordinateIds, isAdmin } = require('../access');
+const { releasesFor } = require('../releases');
 
 const TASK_SQL = `
   SELECT t.*, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, u.name AS assignee_name FROM tasks t
   JOIN projects p ON p.id = t.project_id JOIN users u ON u.id = t.assignee_id
 `;
 
+
 module.exports = function register(router) {
+  // What changed in each platform update, with the steps owners and admins need to take.
+  router.get('/api/releases', ({ user }) => ({ releases: releasesFor(isAdmin(user)) }), { ungated: true });
+
   // Polled by the browser: latest notifications plus the sidebar badge counters, in two queries.
   router.get('/api/notifications', async ({ db, user }) => {
     const notifications = await db.all('SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 50', user.id);

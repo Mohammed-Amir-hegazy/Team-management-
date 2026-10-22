@@ -1,7 +1,7 @@
 import {
   state, $, $$, esc, icon, mark, api, render, setTitle, setFab, toast, openModal,
   STATUS_LABELS, STATUSES, PRIORITY_LABELS, ROLE_LABELS, statusPill, avatar, tabs, onTabs, remember, relTime,
-  fmtDateTime, fmtDate, deadlineInfo, emptyState, stackBar, plural, TASKS_N,
+  fmtDateTime, fmtDate, deadlineInfo, emptyState, stackBar, plural, TASKS_N, managerPicker,
 } from '../core.js';
 import { uploadImages, pickImages, gallery, bindGallery, thumb, progressBar } from '../uploads.js';
 import { openWhatsApp, reportMessage } from '../whatsapp.js';
@@ -143,8 +143,8 @@ export async function composeReport({ project_id: projectId = null, task_id: tas
     title: 'تقرير جديد',
     wide: true,
     body: `
-      <div class="callout blue">${avatar(me.supervisor_name, me.supervisor_id, 'sm')}<div>يُرسل هذا التقرير إلى
-        <strong>${esc(me.supervisor_name)}</strong> بصفته مسؤولك المباشر${label ? ` · بخصوص ${esc(label)}` : ''}، ويمكنك بعد الإرسال مشاركته عبر واتساب.</div></div>
+      ${managerPicker('يُرسل التقرير إلى')}
+      ${label ? `<div class="muted small" style="margin:-.4rem 0 .8rem">بخصوص ${esc(label)}</div>` : ''}
       ${projects.length ? `<div class="field"><label>نطاق التقرير</label><select name="scope">
         <option value="">جميع أعمالي</option>
         ${projects.map((p) => `<option value="${p.id}">مشروع: ${esc(p.name)}</option>`).join('')}</select></div>` : ''}
@@ -162,6 +162,7 @@ export async function composeReport({ project_id: projectId = null, task_id: tas
       const scope = d.scope ? Number(d.scope) : projectId;
       const { report } = await api('POST', '/api/reports', {
         title: d.title, body: d.body, project_id: scope, task_id: taskId, include_status: d.include_status, images,
+        recipient_id: Number(d.recipient_id) || null,
       });
       location.hash = `#/reports/${report.id}?sent=1`;
     },
@@ -273,7 +274,7 @@ export async function viewReport({ id, query }) {
       <div class="titles"><a class="crumb" href="#/reports">${icon('back')}التقارير</a></div>
       <div class="actions">
         ${can.reply ? `<button class="btn" id="reply">${icon('reply')}رد</button>` : ''}
-        ${can.forward ? `<button class="btn ghost" id="forward">${icon('forward')}إحالة إلى ${esc(state.me.supervisor_name)}</button>` : ''}
+        ${can.forward ? `<button class="btn ghost" id="forward">${icon('forward')}إحالة إلى مستوى أعلى</button>` : ''}
         ${(state.me.chain || []).length ? `<button class="btn wa" id="wa">${icon('whatsapp')}إرسال عبر واتساب</button>` : ''}
         <button class="btn ghost" id="pdf">${icon('pdf')}تنزيل PDF</button>
       </div>
@@ -296,11 +297,12 @@ export async function viewReport({ id, query }) {
     },
   }));
   if (can.forward) $('#forward', el).addEventListener('click', () => openModal({
-    title: `إحالة التقرير إلى ${state.me.supervisor_name}`,
-    body: '<div class="field"><label>تعليقك <span class="hint">(اختياري)</span></label><textarea name="note"></textarea></div>',
+    title: 'إحالة التقرير',
+    body: `${managerPicker('إحالة إلى')}
+      <div class="field"><label>تعليقك <span class="hint">(اختياري)</span></label><textarea name="note"></textarea></div>`,
     submitLabel: 'إحالة',
     onSubmit: async (d) => {
-      const res = await api('POST', `/api/reports/${r.id}/forward`, d);
+      const res = await api('POST', `/api/reports/${r.id}/forward`, { note: d.note, recipient_id: Number(d.recipient_id) || null });
       toast('تمت إحالة التقرير');
       location.hash = `#/reports/${res.report_id}`;
     },

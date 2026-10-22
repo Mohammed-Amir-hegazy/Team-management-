@@ -132,3 +132,36 @@ test('an empty source is skipped, and an older schema is brought up to date', as
   assert.equal((await target.get('SELECT company_id FROM projects')).company_id, company.id);
   target.close();
 });
+
+test('each platform update is announced once to every company, with steps for its admins', async () => {
+  const { deliverReleases, RELEASES } = require('../server/releases');
+  const db = await openDatabase(`file:${path.join(tmpDir, 'releases.db')}`);
+  const app = await serve(db);
+  const o = client(app.base);
+  const me = (await o('POST', '/api/signup', { company_name: 'R1', name: 'Owner', email: 'boss@ebtikar.co', password: 'secret123' })).data.user;
+  const emp = (await o('POST', '/api/users', { name: 'Emp', email: 'e@r1.co', password: 'secret123', roles: ['employee'], supervisor_id: me.id, gender: 'male' })).data.user;
+  const emails = [];
+  const messenger = { async sendNotice(n) { emails.push(n); } };
+
+  const [first, second] = await Promise.all([deliverReleases(db, messenger), deliverReleases(db, messenger)]);
+  assert.equal(first.length + second.length, RELEASES.length, 'two servers starting together announce it once');
+  assert.deepEqual(await deliverReleases(db, messenger), [], 'and never again');
+  await new Promise((r) => setTimeout(r, 50));
+
+  const notes = async (id) => (await db.all('SELECT type, message, link FROM notifications WHERE user_id = ? AND type LIKE ? ORDER BY id', id, 'update%'));
+  const ownerNotes = await notes(me.id);
+  assert.equal(ownerNotes.filter((n) => n.type === 'update').length, RELEASES.length);
+  assert.ok(ownerNotes.some((n) => n.type === 'update_action' && n.link === '#/people?genders=1'), 'the owner is asked to set genders (theirs is missing)');
+  const empNotes = await notes(emp.id);
+  assert.equal(empNotes.filter((n) => n.type === 'update_action').length, 0, 'employees get the news, not the admin steps');
+  assert.ok(emails.some((e) => e.email === 'boss@ebtikar.co' && e.text.includes('خطوات مطلوبة')), 'admins also get it by email');
+  assert.ok(!emails.some((e) => e.email === 'e@r1.co'));
+
+  // The "what's new" sheet: steps only for owners and admins.
+  assert.ok((await o('GET', '/api/releases')).data.releases[0].actions.length > 0);
+  const e = client(app.base);
+  await e('POST', '/api/login', { email: 'e@r1.co', password: 'secret123' });
+  assert.equal((await e('GET', '/api/releases')).data.releases[0].actions.length, 0);
+  app.server.close();
+  db.close();
+});

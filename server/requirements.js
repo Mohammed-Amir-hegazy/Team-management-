@@ -1,13 +1,13 @@
 'use strict';
 
-// Bundles a user's draft requirement items into one request to their direct supervisor.
+// Bundles a user's draft requirement items into one request to a manager above them (the direct supervisor by default).
 
 const { HttpError } = require('./http');
 const { now } = require('./db');
-const { requireSupervisor, notify } = require('./access');
+const { chooseManager, notify, byGender } = require('./access');
 
-async function sendRequirements(db, user, { project, task = null, note = '' }) {
-  const supervisor = await requireSupervisor(db, user);
+async function sendRequirements(db, user, { project, task = null, note = '', recipientId = null }) {
+  const supervisor = await chooseManager(db, user, recipientId);
   const draftsSql = task
     ? ['SELECT id FROM requirements WHERE task_id = ? AND requested_by = ? AND request_id IS NULL', task.id, user.id]
     : [`SELECT r.id FROM requirements r JOIN tasks t ON t.id = r.task_id
@@ -24,7 +24,7 @@ async function sendRequirements(db, user, { project, task = null, note = '' }) {
     const ph = drafts.map(() => '?').join(',');
     await tx.run(`UPDATE requirements SET request_id = ? WHERE id IN (${ph})`, id, ...drafts.map((d) => d.id));
     const what = task ? `المهمة «${task.title}»` : `مشروع «${project.name}»`;
-    await notify(tx, supervisor.id, 'request', `أرسل ${user.name} ${drafts.length} من المتطلبات الخاصة بـ${what}`, `#/requests/${id}`);
+    await notify(tx, supervisor.id, 'request', `${byGender(user, 'أرسل', 'أرسلت')} ${user.name} ${drafts.length} من المتطلبات الخاصة بـ${what}`, `#/requests/${id}`);
     return { request_id: id, count: drafts.length };
   });
 }

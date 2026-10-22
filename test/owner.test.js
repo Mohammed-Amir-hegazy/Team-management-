@@ -362,3 +362,65 @@ test('anyone asks any colleague, who takes it on as a task or declines it', asyn
   const inProject = await o('POST', `/api/work-requests/${fourth.id}/accept`, { project_id: proj.id });
   assert.equal(inProject.data.task.project_id, proj.id);
 });
+
+test('requests to any manager above: approve, reject, or take on as a task', async () => {
+  const boss = client();
+  await boss('POST', '/api/signup', { company_name: 'Chain', name: 'Chain Owner', email: 'o@chain.co', password: 'secret123' });
+  const me = (await boss('GET', '/api/me')).data.user;
+  const add = async (body) => (await boss('POST', '/api/users', { password: 'secret123', ...body })).data.user;
+  const mgr = await add({ name: 'Mgr', email: 'm@chain.co', roles: ['manager'], supervisor_id: me.id });
+  const lead = await add({ name: 'Lead', email: 'l@chain.co', roles: ['team_leader'], supervisor_id: mgr.id });
+  await add({ name: 'Emp', email: 'e@chain.co', roles: ['employee'], supervisor_id: lead.id });
+  const peer = await add({ name: 'Peer', email: 'p@chain.co', roles: ['employee'], supervisor_id: me.id });
+  const e = client(); await e('POST', '/api/login', { email: 'e@chain.co', password: 'secret123' });
+
+  // Any level above, skipping the direct supervisor; never someone outside the chain.
+  assert.equal((await e('POST', '/api/work-requests', { kind: 'manager', recipient_id: peer.id, title: 'x' })).status, 403);
+  const toMgr = await e('POST', '/api/work-requests', { kind: 'manager', recipient_id: mgr.id, title: 'Laptop upgrade' });
+  assert.equal(toMgr.status, 200, JSON.stringify(toMgr.data));
+  assert.equal(toMgr.data.request.kind, 'manager');
+  const m = client(); await m('POST', '/api/login', { email: 'm@chain.co', password: 'secret123' });
+  assert.equal((await m('GET', `/api/work-requests/${toMgr.data.request.id}`)).data.permissions.approve, true);
+  const approved = await m('POST', `/api/work-requests/${toMgr.data.request.id}/approve`, { note: 'Ordered' });
+  assert.equal(approved.data.request.status, 'accepted');
+  assert.equal(approved.data.request.task_id, null);
+  assert.equal(approved.data.request.response_note, 'Ordered');
+
+  const toOwner = (await e('POST', '/api/work-requests', { kind: 'manager', recipient_id: me.id, title: 'Training budget' })).data.request;
+  assert.equal((await boss('POST', `/api/work-requests/${toOwner.id}/decline`, { note: 'Next quarter' })).data.request.status, 'declined');
+
+  // A colleague's request cannot be "approved" — only taken on or declined.
+  const toPeer = (await e('POST', '/api/work-requests', { recipient_id: peer.id, title: 'Share files' })).data.request;
+  const p = client(); await p('POST', '/api/login', { email: 'p@chain.co', password: 'secret123' });
+  assert.equal((await p('POST', `/api/work-requests/${toPeer.id}/approve`, {})).status, 400);
+
+  // Reports and requirement requests may also go to any manager above.
+  const rep = await e('POST', '/api/reports', { title: 'Escalation', body: 'x', recipient_id: me.id });
+  assert.equal(rep.data.report.recipient_id, me.id);
+});
+
+test('each person has a gender that shapes the wording of messages', async () => {
+  const boss = client();
+  await boss('POST', '/api/signup', { company_name: 'Words', name: 'منى', email: 'o@words.co', password: 'secret123', gender: 'female' });
+  const me = (await boss('GET', '/api/me')).data.user;
+  assert.equal(me.gender, 'female');
+  assert.equal((await boss('POST', '/api/users', { name: 'X', email: 'x@words.co', password: 'secret123', roles: ['employee'], supervisor_id: me.id, gender: 'other' })).status, 400);
+  const admin = (await boss('POST', '/api/users', { name: 'Admin', email: 'a@words.co', password: 'secret123', roles: ['manager', 'admin'], supervisor_id: me.id })).data.user;
+  assert.equal(admin.gender, '', 'not set yet');
+  const emp = (await boss('POST', '/api/users', { name: 'كريم', email: 'k@words.co', password: 'secret123', roles: ['employee'], supervisor_id: admin.id, gender: 'male' })).data.user;
+  assert.equal(emp.gender, 'male');
+
+  // An admin sets genders, the owner's included (only that field on the owner's account).
+  const a = client(); await a('POST', '/api/login', { email: 'a@words.co', password: 'secret123' });
+  assert.equal((await a('PATCH', `/api/users/${me.id}`, { gender: 'female' })).status, 200);
+  assert.equal((await a('PATCH', `/api/users/${me.id}`, { gender: 'female', name: 'Changed' })).status, 403);
+  // Everyone may set their own.
+  assert.equal((await a('PATCH', '/api/me', { gender: 'male' })).data.user.gender, 'male');
+
+  // The owner's actions are worded in the feminine.
+  await boss('POST', '/api/tasks', { title: 'مراجعة', assignee_id: emp.id });
+  const k = client(); await k('POST', '/api/login', { email: 'k@words.co', password: 'secret123' });
+  const note = (await k('GET', '/api/notifications')).data.notifications[0].message;
+  assert.match(note, /^أسندت إليك منى/);
+  assert.equal((await k('GET', '/api/me')).data.user.chain.find((c) => c.id === me.id).gender, 'female');
+});

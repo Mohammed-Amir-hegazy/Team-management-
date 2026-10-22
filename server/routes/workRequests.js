@@ -1,13 +1,14 @@
 'use strict';
 
-// Requests between colleagues: anyone may ask anyone in the company for something; the person asked
-// either takes it on as a task of their own (under one of their projects or standalone) or declines it
-// with a reason. The person who asked follows the task's progress.
+// Requests between people: to a colleague (anyone in the company) or to a manager above (anywhere in
+// the sender's chain). The person asked takes it on as a task of their own (under one of their projects
+// or standalone) or declines it with a reason; a manager may also simply approve it. The person who
+// asked follows the task's progress.
 
 const { HttpError } = require('../http');
 const { now } = require('../db');
 const v = require('../validate');
-const { getUser, notify, loadProject } = require('../access');
+const { getUser, notify, loadProject, ancestorIds, byGender } = require('../access');
 const { createTask } = require('./tasks');
 
 const PRIORITIES = ['low', 'medium', 'high'];
@@ -34,11 +35,11 @@ function pendingFor(row, userId, role) {
 module.exports = function register(router) {
   // Everyone in the company, to choose whom to ask.
   router.get('/api/colleagues', async ({ db, user }) => {
-    const rows = await db.all(`SELECT id, name, job_title, role, photo_version FROM users
+    const rows = await db.all(`SELECT id, name, job_title, role, gender, photo_version FROM users
       WHERE company_id = ? AND active = 1 AND deleted_at IS NULL AND id != ? ORDER BY name`, user.company_id, user.id);
     return {
       colleagues: rows.map((u) => ({
-        id: u.id, name: u.name, job_title: u.job_title, role: u.role,
+        id: u.id, name: u.name, job_title: u.job_title, role: u.role, gender: u.gender || '',
         photo_url: u.photo_version ? `/api/users/${u.id}/photo?v=${u.photo_version}` : null,
       })),
     };
@@ -57,6 +58,7 @@ module.exports = function register(router) {
       request,
       permissions: {
         respond: request.status === 'pending' && request.recipient_id === user.id,
+        approve: request.kind === 'manager' && request.status === 'pending' && request.recipient_id === user.id,
         cancel: request.status === 'pending' && request.sender_id === user.id,
       },
     };
@@ -68,14 +70,18 @@ module.exports = function register(router) {
       throw new HttpError(400, 'الموظف المطلوب غير موجود');
     }
     if (recipient.id === user.id) throw new HttpError(400, 'لا يمكنك إرسال طلب إلى نفسك؛ يمكنك إضافة مهمة لنفسك مباشرة');
+    const kind = v.oneOf(body.kind || 'colleague', ['colleague', 'manager'], 'نوع الطلب');
+    if (kind === 'manager' && !(await ancestorIds(db, user.id)).includes(recipient.id)) {
+      throw new HttpError(403, 'يمكنك إرسال الطلب إلى أحد مسؤوليك في التسلسل الإداري فقط');
+    }
     const title = v.text(body.title, 'عنوان الطلب', { max: 300 });
     const details = v.text(body.details, 'التفاصيل', { required: false, max: 10000 });
     const priority = v.oneOf(body.priority || 'medium', PRIORITIES, 'الأولوية');
     const dueAt = v.optionalDate(body.due_at, 'الموعد المطلوب');
     const id = await db.transaction(async (tx) => {
-      const r = await tx.run(`INSERT INTO work_requests (company_id, sender_id, recipient_id, title, details, priority, due_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, user.company_id, user.id, recipient.id, title, details, priority, dueAt, now());
-      await notify(tx, recipient.id, 'work_request', `طلب منك ${user.name}: «${title}»`, `#/asks/${r.lastInsertRowid}`);
+      const r = await tx.run(`INSERT INTO work_requests (company_id, kind, sender_id, recipient_id, title, details, priority, due_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, user.company_id, kind, user.id, recipient.id, title, details, priority, dueAt, now());
+      await notify(tx, recipient.id, 'work_request', `${byGender(user, 'طلب', 'طلبت')} منك ${user.name}: «${title}»`, `#/asks/${r.lastInsertRowid}`);
       return r.lastInsertRowid;
     });
     return { request: await loadRequest(db, user, id) };
@@ -102,7 +108,8 @@ module.exports = function register(router) {
       if (!r.changes) throw new HttpError(400, 'تم الرد على هذا الطلب مسبقًا');
       await tx.run(`INSERT INTO task_status_history (task_id, user_id, from_status, to_status, note, created_at)
         VALUES (?, ?, 'todo', 'todo', ?, ?)`, task.id, user.id, `بناءً على طلب ${row.sender_name}`, now());
-      await notify(tx, row.sender_id, 'work_request', `قبل ${user.name} طلبك «${row.title}» وأضافه إلى مهامه`, `#/tasks/${task.id}`);
+      await notify(tx, row.sender_id, 'work_request',
+        `${byGender(user, 'قبل', 'قبلت')} ${user.name} طلبك «${row.title}» ${byGender(user, 'وأضافه', 'وأضافته')} إلى ${byGender(user, 'مهامه', 'مهامها')}`, `#/tasks/${task.id}`);
     }).catch(async (err) => {
       await db.run('DELETE FROM task_status_history WHERE task_id = ?', task.id);
       await db.run('DELETE FROM tasks WHERE id = ?', task.id);
@@ -111,13 +118,29 @@ module.exports = function register(router) {
     return { request: await loadRequest(db, user, row.id), task };
   });
 
+  // A manager approves a request addressed to them (stored as accepted, without a task).
+  router.post('/api/work-requests/:id/approve', async ({ db, user, params, body }) => {
+    const row = await loadRequest(db, user, v.id(params.id, 'الطلب'));
+    pendingFor(row, user.id, 'recipient');
+    if (row.kind !== 'manager') throw new HttpError(400, 'طلبات الزملاء تُضاف كمهمة أو يُعتذر عنها');
+    const note = v.text(body.note, 'الملاحظة', { required: false, max: 2000 });
+    await db.transaction(async (tx) => {
+      await tx.run(`UPDATE work_requests SET status = 'accepted', response_note = ?, responded_at = ? WHERE id = ?`, note, now(), row.id);
+      await notify(tx, row.sender_id, 'work_request',
+        `${byGender(user, 'وافق', 'وافقت')} ${user.name} على طلبك «${row.title}»${note ? `: ${note}` : ''}`, `#/asks/${row.id}`);
+    });
+    return { request: await loadRequest(db, user, row.id) };
+  });
+
+  // Declining a colleague's request, or rejecting one sent to a manager: a reason is required.
   router.post('/api/work-requests/:id/decline', async ({ db, user, params, body }) => {
     const row = await loadRequest(db, user, v.id(params.id, 'الطلب'));
     pendingFor(row, user.id, 'recipient');
-    const note = v.text(body.note, 'سبب الاعتذار', { max: 2000 });
+    const note = v.text(body.note, row.kind === 'manager' ? 'سبب الرفض' : 'سبب الاعتذار', { max: 2000 });
+    const said = row.kind === 'manager' ? byGender(user, 'رفض', 'رفضت') : byGender(user, 'اعتذر', 'اعتذرت');
     await db.transaction(async (tx) => {
       await tx.run(`UPDATE work_requests SET status = 'declined', response_note = ?, responded_at = ? WHERE id = ?`, note, now(), row.id);
-      await notify(tx, row.sender_id, 'work_request', `اعتذر ${user.name} عن طلبك «${row.title}»: ${note}`, `#/asks/${row.id}`);
+      await notify(tx, row.sender_id, 'work_request', `${said} ${user.name} ${row.kind === 'manager' ? '' : 'عن '}طلبك «${row.title}»: ${note}`, `#/asks/${row.id}`);
     });
     return { request: await loadRequest(db, user, row.id) };
   });
@@ -127,7 +150,7 @@ module.exports = function register(router) {
     pendingFor(row, user.id, 'sender');
     await db.transaction(async (tx) => {
       await tx.run(`UPDATE work_requests SET status = 'cancelled', responded_at = ? WHERE id = ?`, now(), row.id);
-      await notify(tx, row.recipient_id, 'work_request', `ألغى ${user.name} طلبه «${row.title}»`, `#/asks/${row.id}`);
+      await notify(tx, row.recipient_id, 'work_request', `${byGender(user, 'ألغى', 'ألغت')} ${user.name} ${byGender(user, 'طلبه', 'طلبها')} «${row.title}»`, `#/asks/${row.id}`);
     });
     return { request: await loadRequest(db, user, row.id) };
   });

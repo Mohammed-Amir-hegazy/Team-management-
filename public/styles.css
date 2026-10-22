@@ -985,3 +985,18 @@ textarea.msg-edit { min-height: 220px; line-height: 1.75; font-size: .92rem; res
 .ask-people { max-height: 260px; margin-top: .5rem; }
 .ask-people .check { align-items: center; }
 .ask-people .check small { display: block; color: var(--muted); font-size: .78rem; }
+.kind-pick .check { align-items: center; }
+.kind-pick .check svg { width: 22px; height: 22px; color: var(--primary); flex-shrink: 0; }
+.kind-pick .check small { display: block; color: var(--muted); font-size: .78rem; }
+/* Two-choice pill switch (e.g. male / female) */
+.seg { display: inline-flex; gap: .25rem; padding: .2rem; border-radius: 12px; background: var(--surface-3); flex-shrink: 0; }
+.seg label { cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; padding: .35rem .8rem; border-radius: 9px; font-size: .88rem; color: var(--muted); transition: background .2s, color .2s; }
+.seg input:checked + span { background: var(--surface); color: var(--primary); font-weight: 600; box-shadow: var(--shadow-sm); }
+.seg input:focus-visible + span { outline: 2px solid var(--primary); }
+
+/* What's new */
+.release h3 { margin: .2rem 0 .6rem; }
+.release-list { margin: 0 0 .9rem; padding-inline-start: 1.2rem; line-height: 1.9; }
+.release-action { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-top: .5rem; }

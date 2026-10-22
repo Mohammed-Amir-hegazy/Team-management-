@@ -3,7 +3,10 @@ import {
   REQUEST_STATUS, pill, avatar, tabs, onTabs, remember, relTime, fmtDateTime, emptyState, plural, ITEMS_N,
 } from '../core.js';
 import { openReminder } from '../remind.js';
+import { askRow, newRequestModal } from './asks.js';
 
+// One page for every request: requirement requests (sent from a task or project) and requests to a
+// manager or a colleague, in and out, with one "send a request" button.
 export async function viewRequests({ query }) {
   setTitle('الطلبات');
   const boxes = [['inbox', 'الوارد'], ['sent', 'المرسل']];
@@ -11,31 +14,45 @@ export async function viewRequests({ query }) {
   let box = query.get('box') || remember('requestBox') || 'inbox';
   if (!boxes.some(([k]) => k === box)) box = 'inbox';
   remember('requestBox', box);
-  const { requests } = await api('GET', `/api/requests?box=${box}`);
+  const [{ requests }, asks] = await Promise.all([
+    api('GET', `/api/requests?box=${box}`),
+    box === 'team' ? { requests: [] } : api('GET', `/api/work-requests?box=${box}`),
+  ]);
+  // Waiting ones first, then newest.
+  const items = [
+    ...requests.map((q) => ({ kind: 'requirements', at: q.created_at, pending: q.status === 'pending', q })),
+    ...asks.requests.map((q) => ({ kind: 'ask', at: q.created_at, pending: q.status === 'pending', q })),
+  ].sort((a, b) => (b.pending - a.pending) || (a.at < b.at ? 1 : -1));
 
   const el = render(`
     <div class="page-head">
       <div class="titles"><h1>الطلبات</h1>
-        <div class="sub">تُضاف المتطلبات من صفحة كل مهمة، وتُرسل دفعة واحدة للمهمة أو للمشروع بالكامل</div></div>
+        <div class="sub">اطلب من مسؤوليك أو من أي زميل، وتُرسل المتطلبات من صفحة كل مهمة أو مشروع</div></div>
+      <div class="actions"><button class="btn" id="new-request">${icon('send')}إرسال طلب</button></div>
     </div>
     ${tabs(boxes, box)}
     <section class="card">
-      ${requests.length ? `<div class="list stagger">${requests.map((q, i) => {
-        const person = box === 'sent' ? { name: q.recipient_name, id: q.recipient_id } : { name: q.sender_name, id: q.sender_id };
-        return `<div class="item link" data-href="#/requests/${q.id}" style="--i:${Math.min(i, 12)}">
-          ${avatar(person.name, person.id)}
-          <div class="grow">
-            <div class="title">${q.scope === 'project' ? `جميع متطلبات مشروع «${esc(q.project_name)}»` : `متطلبات المهمة «${esc(q.task_title)}»`}</div>
-            <div class="meta">${box === 'sent' ? `إلى ${esc(q.recipient_name)}` : box === 'team' ? `${esc(q.sender_name)} ← ${esc(q.recipient_name)}` : `من ${esc(q.sender_name)}`}
-              · ${plural(q.items_count, ITEMS_N)} · ${esc(relTime(q.created_at))}${q.forwarded_from_id ? ' · مُحال' : ''}</div>
-          </div>
-          ${pill(REQUEST_STATUS[q.status])}
-        </div>`;
-      }).join('')}</div>` : emptyState(box === 'inbox' ? 'لا توجد طلبات بانتظار ردك' : 'لا توجد طلبات',
-        box === 'sent' ? 'أضف المتطلبات من صفحة المهمة ثم أرسلها بضغطة زر.' : '')}
+      ${items.length ? `<div class="list stagger">${items.map((it, i) => (it.kind === 'ask' ? askRow(it.q, box, i) : requirementRow(it.q, box, i))).join('')}</div>`
+    : emptyState(box === 'inbox' ? 'لا توجد طلبات واردة' : 'لا توجد طلبات',
+      box === 'sent' ? 'اضغط «إرسال طلب» لتطلب من مسؤوليك أو زملائك، أو أرسل المتطلبات من صفحة المهمة.' : '')}
     </section>`);
   onTabs(el, (tab) => { location.hash = `#/requests?box=${tab}`; });
-  setFab(null);
+  $('#new-request', el).addEventListener('click', () => newRequestModal());
+  setFab('إرسال طلب', () => newRequestModal());
+}
+
+function requirementRow(q, box, i) {
+  const person = box === 'sent' ? { name: q.recipient_name, id: q.recipient_id } : { name: q.sender_name, id: q.sender_id };
+  return `<div class="item link" data-href="#/requests/${q.id}" style="--i:${Math.min(i, 12)}">
+    ${avatar(person.name, person.id)}
+    <div class="grow">
+      <div class="title">${q.scope === 'project' ? `جميع متطلبات مشروع «${esc(q.project_name)}»` : `متطلبات المهمة «${esc(q.task_title)}»`}</div>
+      <div class="meta"><span class="pill gray plain">متطلبات</span>
+        ${box === 'sent' ? `إلى ${esc(q.recipient_name)}` : box === 'team' ? `${esc(q.sender_name)} ← ${esc(q.recipient_name)}` : `من ${esc(q.sender_name)}`}
+        · ${plural(q.items_count, ITEMS_N)} · ${esc(relTime(q.created_at))}${q.forwarded_from_id ? ' · مُحال' : ''}</div>
+    </div>
+    ${pill(REQUEST_STATUS[q.status])}
+  </div>`;
 }
 
 export async function viewRequest({ id }) {

@@ -11,6 +11,7 @@ const { loadConfig } = require('./config');
 const { syncPlatformOwner } = require('./owner');
 const { databaseSettings, databaseHost } = require('./storage');
 const { importDatabase } = require('./importer');
+const { deliverReleases } = require('./releases');
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -41,6 +42,12 @@ async function main() {
   if (config.storageWarning) console.warn(STORAGE_WARNINGS[config.storageWarning]);
   await syncPlatformOwner(db, config);
   const messenger = createMessenger();
+  try {
+    const sent = await deliverReleases(db, messenger);
+    if (sent.length) console.log('Announced platform updates:', sent.join(', '));
+  } catch (err) {
+    console.error('Could not announce platform updates:', err.message);
+  }
   startScheduler(db, { messenger });
   http.createServer(createApp(db, { messenger, config })).listen(PORT, () => {
     const where = `${settings.url.startsWith('file:') ? settings.url : `Turso ${databaseHost(settings.url)}`}${

@@ -84,6 +84,24 @@ async function isSelfOrBelow(db, user, otherId) {
   return user.id === otherId || isAbove(db, user.id, otherId);
 }
 
+// Reports and requests go to any manager above in the person's own chain; the direct supervisor
+// when none is chosen.
+async function chooseManager(db, user, recipientId) {
+  if (recipientId === undefined || recipientId === null || recipientId === '') return requireSupervisor(db, user);
+  const id = Number(recipientId);
+  if (!(await ancestorIds(db, user.id)).includes(id)) {
+    throw new HttpError(403, 'يمكنك الإرسال إلى أحد مسؤوليك في التسلسل الإداري فقط');
+  }
+  const manager = await getUser(db, id);
+  if (!manager || !manager.active) throw new HttpError(400, 'المسؤول المختار غير متاح حاليًا');
+  return manager;
+}
+
+// Wording that follows a person's gender (the masculine form when it is not set).
+function byGender(user, male, female) {
+  return user && user.gender === 'female' ? female : male;
+}
+
 async function requireSupervisor(db, user) {
   if (!user.supervisor_id) {
     throw new HttpError(400, 'لا يوجد مسؤول مباشر أعلى منك لإرسال هذا إليه');
@@ -227,6 +245,7 @@ function publicUser(user) {
     email: user.email,
     job_title: user.job_title || '',
     phone: user.phone || '',
+    gender: user.gender || '',
     role: user.role,
     role_label: ROLE_LABELS[user.role],
     roles,
@@ -243,6 +262,8 @@ function publicUser(user) {
 }
 
 module.exports = {
+  chooseManager,
+  byGender,
   ORG_ROLES,
   ROLES,
   ROLE_LABELS,

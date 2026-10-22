@@ -6,7 +6,7 @@ const v = require('../validate');
 const {
   TASK_STATUSES, STATUS_LABELS, PRIORITIES, getUser, subordinateIds, isSelfOrBelow,
   addProjectMember, loadProject, loadTask, canEditTask, canUpdateTaskStatus,
-  purgeTasks, notify, personalProject,
+  purgeTasks, notify, personalProject, byGender,
 } = require('../access');
 const { sendRequirements } = require('../requirements');
 const { validateImages } = require('../images');
@@ -61,7 +61,7 @@ async function createTask(db, user, project, body) {
     await tx.run('INSERT INTO task_status_history (task_id, user_id, from_status, to_status, note, created_at) VALUES (?, ?, NULL, ?, ?, ?)',
       taskId, user.id, 'todo', 'تم إنشاء المهمة', ts);
     if (assigneeId !== user.id) {
-      await notify(tx, assigneeId, 'task', `أسند إليك ${user.name} مهمة جديدة: «${title}»`, `#/tasks/${taskId}`);
+      await notify(tx, assigneeId, 'task', `${byGender(user, 'أسند', 'أسندت')} إليك ${user.name} مهمة جديدة: «${title}»`, `#/tasks/${taskId}`);
     }
     return taskId;
   });
@@ -195,7 +195,7 @@ module.exports = function register(router) {
         if (project.personal_owner_id) next.project_id = (await personalProject(tx, await getUser(tx, next.assignee_id))).id;
         await addProjectMember(tx, next.project_id, next.assignee_id);
         if (next.assignee_id !== user.id) {
-          await notify(tx, next.assignee_id, 'task', `أسند إليك ${user.name} المهمة «${next.title}»`, `#/tasks/${task.id}`);
+          await notify(tx, next.assignee_id, 'task', `${byGender(user, 'أسند', 'أسندت')} إليك ${user.name} المهمة «${next.title}»`, `#/tasks/${task.id}`);
         }
       }
       await tx.run(`
@@ -232,7 +232,7 @@ module.exports = function register(router) {
       const reason = note ? `: ${note}` : '';
       for (const uid of watchers) {
         await notify(tx, uid, status === 'blocked' ? 'blocked' : 'status',
-          `غيّر ${user.name} حالة المهمة «${task.title}» إلى «${STATUS_LABELS[status]}»${reason}`, `#/tasks/${task.id}`);
+          `${byGender(user, 'غيّر', 'غيّرت')} ${user.name} حالة المهمة «${task.title}» إلى «${STATUS_LABELS[status]}»${reason}`, `#/tasks/${task.id}`);
       }
     });
     return { task: await taskWithNames(db, task.id) };
@@ -260,7 +260,7 @@ module.exports = function register(router) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, task.id, user.id, img.url, img.public_id, img.width, img.height, caption, ts);
       }
       if (task.assignee_id !== user.id) {
-        await notify(tx, task.assignee_id, 'task', `أضاف ${user.name} صورًا إلى المهمة «${task.title}»`, `#/tasks/${task.id}`);
+        await notify(tx, task.assignee_id, 'task', `${byGender(user, 'أضاف', 'أضافت')} ${user.name} صورًا إلى المهمة «${task.title}»`, `#/tasks/${task.id}`);
       }
     });
     return { ok: true, count: images.length };
@@ -280,7 +280,7 @@ module.exports = function register(router) {
       task.assignee_id, link, new Date(Date.now() - 10 * 60 * 1000).toISOString());
     if (recent) throw new HttpError(429, 'أُرسل تذكير بهذه المهمة قبل قليل؛ يُرجى الانتظار عشر دقائق');
     await notify(db, task.assignee_id, 'nudge',
-      `🔔 يذكّرك ${user.name} بالمهمة «${task.title}»${message ? `: ${message}` : ''}`, link);
+      `🔔 ${byGender(user, 'يذكّرك', 'تذكّرك')} ${user.name} بالمهمة «${task.title}»${message ? `: ${message}` : ''}`, link);
     return { ok: true };
   });
 
@@ -308,7 +308,7 @@ module.exports = function register(router) {
   router.post('/api/tasks/:id/requirements/send', async ({ db, user, params, body }) => {
     const { task, project } = await loadTask(db, user, v.id(params.id, 'المهمة'));
     const note = v.text(body.note, 'الملاحظة', { required: false, max: 2000 });
-    return sendRequirements(db, user, { project, task, note });
+    return sendRequirements(db, user, { project, task, note, recipientId: body.recipient_id });
   });
 };
 

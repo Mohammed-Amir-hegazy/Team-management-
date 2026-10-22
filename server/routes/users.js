@@ -21,6 +21,9 @@ const NOT_ALLOWED = 'ليست لديك صلاحية لتنفيذ هذا الإج
 
 const { validatePassword } = auth;
 
+const GENDERS = ['', 'male', 'female'];
+const readGender = (value) => v.oneOf(value || '', GENDERS, 'النوع');
+
 function validateEmail(value) {
   const email = v.text(value, 'البريد الإلكتروني', { max: 200 }).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+$/.test(email)) throw new HttpError(400, 'صيغة البريد الإلكتروني غير صحيحة');
@@ -155,6 +158,7 @@ async function registerCompany({ db, body, res, config }, { firstRun = false } =
   const email = validateEmail(body.email);
   const password = validatePassword(body.password);
   const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+  const gender = readGender(body.gender);
   const creator = v.oneOf(body.creator_role || 'owner', ['owner', 'admin'], 'صفتك في الشركة');
   const level = creator === 'admin' ? v.oneOf(body.creator_level, CREATOR_LEVELS, 'دورك الوظيفي') : 'owner';
   const roles = creator === 'admin' ? [level, 'admin'] : ['owner'];
@@ -167,9 +171,9 @@ async function registerCompany({ db, body, res, config }, { firstRun = false } =
       ? await createCompany(tx, { name: companyName, plan: 'owned' })
       : await createCompany(tx, { name: companyName, plan: 'trial', seats: config.trialSeats, days: config.trialDays });
     const r = await tx.run(`
-      INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, is_platform, supervisor_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
-    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, phone, companyId, platformOwner ? 1 : 0, now());
+      INSERT INTO users (name, email, password_hash, role, roles, job_title, gender, phone, company_id, is_platform, supervisor_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, gender, phone, companyId, platformOwner ? 1 : 0, now());
     if (!platformOwner) {
       for (const p of await platformAdmins(tx)) {
         await notify(tx, p.id, 'platform', `سجّلت شركة جديدة «${companyName}» وبدأت الفترة التجريبية`, `#/platform/companies/${companyId}`);
@@ -259,7 +263,7 @@ module.exports = function register(router) {
     const chain = [];
     for (const id of await ancestorIds(db, user.id)) {
       const u = await getUser(db, id);
-      chain.push({ id: u.id, name: u.name, job_title: u.job_title, role: u.role, phone: u.phone });
+      chain.push({ id: u.id, name: u.name, job_title: u.job_title, role: u.role, phone: u.phone, gender: u.gender || '' });
     }
     out.chain = chain;
     out.company = {
@@ -277,8 +281,9 @@ module.exports = function register(router) {
 
   // Everyone keeps their own WhatsApp number up to date.
   router.patch('/api/me', async ({ db, user, body, config }) => {
-    const phone = await readPhone(db, body.phone, config, user.id);
-    await db.run('UPDATE users SET phone = ? WHERE id = ?', phone, user.id);
+    const phone = body.phone !== undefined ? await readPhone(db, body.phone, config, user.id) : user.phone;
+    const gender = body.gender !== undefined ? readGender(body.gender) : user.gender;
+    await db.run('UPDATE users SET phone = ?, gender = ? WHERE id = ?', phone, gender, user.id);
     return { user: await withSupervisorName(db, await getUser(db, user.id)) };
   }, { ungated: true });
 
@@ -383,6 +388,7 @@ module.exports = function register(router) {
     const email = validateEmail(body.email);
     const password = validatePassword(body.password);
     const jobTitle = v.text(body.job_title, 'المسمى الوظيفي', { required: false, max: 120 });
+    const gender = readGender(body.gender);
     // A company registered by its system admin may not have an owner yet; the admin can add one (only one).
     const asOwner = Array.isArray(body.roles) && body.roles.includes('owner');
     let roles; let level; let supervisorId = null;
@@ -403,9 +409,9 @@ module.exports = function register(router) {
     await assertSeatAvailable(db, user.company_id);
 
     const r = await db.run(`
-      INSERT INTO users (name, email, password_hash, role, roles, job_title, phone, company_id, is_platform, supervisor_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, phone, user.company_id,
+      INSERT INTO users (name, email, password_hash, role, roles, job_title, gender, phone, company_id, is_platform, supervisor_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, name, email, auth.hashPassword(password), level, roles.join(','), jobTitle, gender, phone, user.company_id,
     isPlatformEmail(config, email) ? 1 : 0, supervisorId, now());
     // Whoever sat at the top until now (e.g. the admin who registered the company) reports to the new owner.
     if (asOwner) {
@@ -420,7 +426,9 @@ module.exports = function register(router) {
     const target = await getUser(db, v.id(params.id, 'المستخدم'));
     if (!target || target.company_id !== user.company_id) throw new HttpError(404, 'المستخدم غير موجود');
     const isOwner = target.role === 'owner';
-    if (isOwner && target.id !== user.id) throw new HttpError(403, 'لا يمكن تعديل حساب صاحب الشركة إلا من قِبله');
+    // Admins may still set the owner's gender (for correct wording in messages); nothing else.
+    const onlyGender = Object.keys(body).length > 0 && Object.keys(body).every((k) => k === 'gender');
+    if (isOwner && target.id !== user.id && !onlyGender) throw new HttpError(403, 'لا يمكن تعديل حساب صاحب الشركة إلا من قِبله');
 
     const next = { ...target };
     if (body.name !== undefined) next.name = v.text(body.name, 'الاسم', { max: 120 });
@@ -430,6 +438,7 @@ module.exports = function register(router) {
       if (await emailTaken(db, next.email, target.id)) throw new HttpError(409, 'البريد الإلكتروني مستخدم في حساب آخر');
     }
     if (body.phone !== undefined) next.phone = await readPhone(db, body.phone, config, target.id);
+    if (body.gender !== undefined) next.gender = readGender(body.gender);
 
     if (!isOwner && (body.roles !== undefined || body.supervisor_id !== undefined)) {
       const roles = body.roles !== undefined ? validateRoles(body.roles) : userRoles(target);
@@ -455,9 +464,9 @@ module.exports = function register(router) {
 
     await db.transaction(async (tx) => {
       await tx.run(`
-        UPDATE users SET name = ?, email = ?, job_title = ?, phone = ?, role = ?, roles = ?, supervisor_id = ?, active = ?
+        UPDATE users SET name = ?, email = ?, job_title = ?, gender = ?, phone = ?, role = ?, roles = ?, supervisor_id = ?, active = ?
         WHERE id = ?
-      `, next.name, next.email, next.job_title, next.phone, next.role, next.roles, next.supervisor_id, next.active, target.id);
+      `, next.name, next.email, next.job_title, next.gender || '', next.phone, next.role, next.roles, next.supervisor_id, next.active, target.id);
       if (body.password !== undefined && body.password !== '') {
         await tx.run('UPDATE users SET password_hash = ? WHERE id = ?',
           auth.hashPassword(validatePassword(body.password)), target.id);

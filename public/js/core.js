@@ -504,3 +504,20 @@ export function bindCreatorFields(root) {
   root.querySelectorAll('input[name=creator_role]').forEach((r) => r.addEventListener('change', sync));
   sync();
 }
+
+// "To": my direct supervisor (first, chosen by default) or any manager above them.
+export function managerPicker(label = 'إلى', name = 'recipient_id') {
+  const chain = (state.me && state.me.chain) || [];
+  return `<div class="field"><label>${label}</label><select name="${name}">
+    ${chain.map((m, i) => `<option value="${m.id}">${esc(m.name)}${m.job_title ? ` — ${esc(m.job_title)}` : ''}${
+      i === 0 ? ' (المسؤول المباشر)' : ''}</option>`).join('')}</select>
+    <span class="hint">يمكنك الإرسال إلى مسؤولك المباشر أو إلى أي مسؤول أعلى منه.</span></div>`;
+}
+
+// Male / female: used to address each person correctly in messages.
+export function genderField(value = '', { name = 'gender', label = 'النوع' } = {}) {
+  return `<div class="field"><label>${label}</label><select name="${name}">
+    <option value="" ${value ? '' : 'selected'}>— غير محدد —</option>
+    <option value="male" ${value === 'male' ? 'selected' : ''}>ذكر</option>
+    <option value="female" ${value === 'female' ? 'selected' : ''}>أنثى</option></select></div>`;
+}

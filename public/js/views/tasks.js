@@ -2,7 +2,7 @@ import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal, confirmDialog, attempt, busy,
   STATUS_LABELS, STATUSES, PRIORITY_LABELS, REQUEST_STATUS,
   statusPill, pill, avatar, taskList, tabs, onTabs, remember, deadlineInfo, fmtDateTime, relTime,
-  toLocalInput, fromLocalInput, plural, ITEMS_N, formData,
+  toLocalInput, fromLocalInput, plural, ITEMS_N, formData, managerPicker,
 } from '../core.js';
 import { composeReport } from './reports.js';
 import { gallery, bindGallery, photoUploadModal } from '../uploads.js';
@@ -80,12 +80,12 @@ export async function taskFormModal({ projectId = null, task = null, assignable 
 export function sendRequirementsModal(path, count, after) {
   openModal({
     title: 'إرسال المتطلبات',
-    body: `<div class="callout blue">${icon('send')}<div>سيتم إرسال <strong>${plural(count, ITEMS_N)}</strong> إلى
-      <strong>${esc(state.me.supervisor_name)}</strong> بصفته مسؤولك المباشر.</div></div>
+    body: `<div class="callout blue">${icon('send')}<div>سيتم إرسال <strong>${plural(count, ITEMS_N)}</strong> في طلب واحد.</div></div>
+      ${managerPicker('إلى')}
       <div class="field"><label>ملاحظة مرفقة <span class="hint">(اختياري)</span></label><textarea name="note" placeholder="مثال: نحتاجها قبل نهاية الأسبوع"></textarea></div>`,
     submitLabel: 'إرسال الآن',
     onSubmit: async (d) => {
-      const r = await api('POST', path, d);
+      const r = await api('POST', path, { note: d.note, recipient_id: Number(d.recipient_id) || null });
       toast(`تم إرسال ${plural(r.count, ITEMS_N)} بنجاح`);
       after();
     },

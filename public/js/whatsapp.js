@@ -68,10 +68,17 @@ export function openWhatsApp(phone, text, { name = '' } = {}) {
 
 const appLink = (hash) => `${location.origin}/${hash}`;
 
-function salutation(name, relation) {
-  return relation === 'up'
-    ? `حضرة الأستاذ/ة ${name} المحترم/ة،\nتحية طيبة وبعد،`
-    : `الزميل/ة العزيز/ة ${name}،\nتحية طيبة،`;
+// Formal address that follows the recipient's gender (both forms when it is not set).
+export function formalTitle(person) {
+  if (person.gender === 'male') return `حضرة الأستاذ ${person.name} المحترم،`;
+  if (person.gender === 'female') return `حضرة الأستاذة ${person.name} المحترمة،`;
+  return `حضرة الأستاذ/ة ${person.name} المحترم/ة،`;
+}
+
+function salutation(person, relation) {
+  if (relation === 'up') return `${formalTitle(person)}\nتحية طيبة وبعد،`;
+  const dear = { male: 'الزميل العزيز', female: 'الزميلة العزيزة' }[person.gender] || 'الزميل/ة العزيز/ة';
+  return `${dear} ${person.name}،\nتحية طيبة،`;
 }
 
 function closing(relation) {
@@ -85,7 +92,7 @@ function closing(relation) {
 export function reportMessage(report, recipient, relation = 'up') {
   const me = state.me;
   const s = report.snapshot && report.snapshot.summary;
-  const lines = [salutation(recipient.name, relation), ''];
+  const lines = [salutation(recipient, relation), ''];
   lines.push(report.sender_id === me.id
     ? `أرفع إليكم *${report.title}* بتاريخ ${fmtDate(report.created_at)}.`
     : `أرفع إليكم *${report.title}* المقدَّم من ${report.sender_name} بتاريخ ${fmtDate(report.created_at)}.`);
@@ -120,7 +127,7 @@ export function reportMessage(report, recipient, relation = 'up') {
 
 export function taskReminderMessage(task, person, note = '') {
   const late = task.status !== 'done' && task.deadline && new Date(task.deadline) < new Date();
-  const lines = [salutation(person.name, 'down'), ''];
+  const lines = [salutation(person, 'down'), ''];
   lines.push(`نودّ تذكيركم بالمهمة *«${task.title}»*${task.standalone ? '' : ` ضمن «${task.project_name}»`}.`);
   lines.push(`• الحالة الحالية: ${STATUS_LABELS[task.status]}`, `• الأولوية: ${PRIORITY_LABELS[task.priority]}`);
   if (task.deadline) lines.push(`• الموعد النهائي: ${fmtDateTime(task.deadline)}${late ? ' (متأخرة)' : ''}`);
@@ -131,7 +138,7 @@ export function taskReminderMessage(task, person, note = '') {
 
 export function requestReminderMessage(request, person, note = '') {
   const what = request.scope === 'project' ? `متطلبات مشروع «${request.project_name}»` : `متطلبات المهمة «${request.task_title}»`;
-  const lines = [salutation(person.name, 'up'), ''];
+  const lines = [salutation(person, 'up'), ''];
   lines.push(`أودّ تذكيركم بطلب *${what}* المرسل بتاريخ ${fmtDate(request.created_at)}، والذي لا يزال بانتظار ردّكم الكريم.`);
   lines.push(`• عدد المتطلبات: ${plural(request.items_count, ITEMS_N)}`);
   if (note) lines.push('', note);
@@ -140,7 +147,7 @@ export function requestReminderMessage(request, person, note = '') {
 }
 
 export function generalMessage(person, relation, note) {
-  return [salutation(person.name, relation), '', note || '…', closing(relation)].join('\n');
+  return [salutation(person, relation), '', note || '…', closing(relation)].join('\n');
 }
 
 // A company's owner/admin asking the platform team to renew.
@@ -159,7 +166,7 @@ export function renewalRequestMessage(company, note = '') {
 // The platform owner reminding a company's owner to renew.
 export function renewalReminderMessage(company) {
   const owner = company.owner;
-  const lines = [`حضرة الأستاذ/ة ${owner.name} المحترم/ة،`, 'تحية طيبة وبعد،', ''];
+  const lines = [formalTitle(owner), 'تحية طيبة وبعد،', ''];
   const what = company.plan === 'trial' ? 'الفترة التجريبية لشركة' : 'اشتراك شركة';
   lines.push(company.ok
     ? `نودّ تذكيركم بأن ${what} *«${company.name}»* في منصة ابتكار تنتهي بتاريخ ${fmtDate(company.ends_at)}، والمتبقي ${plural(company.days_left, DAYS_N)}.`
