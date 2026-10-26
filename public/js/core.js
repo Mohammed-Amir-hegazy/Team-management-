@@ -441,14 +441,9 @@ export function setTitle(text) {
 }
 
 // The floating "+" button on phones; each view decides what it does (or hides it).
+// The page's own way of creating something; offered first in the «إنشاء» menu (see nav.js).
 export function setFab(label, fn) {
-  const fab = $('#fab');
-  fab.onclick = fn || null;
-  fab.classList.toggle('hidden', !fn);
-  if (fn) {
-    fab.innerHTML = icon('plus');
-    fab.setAttribute('aria-label', label);
-  }
+  state.pageAction = fn ? { label, fn } : null;
 }
 
 // ---------------------------------------------------------------------------

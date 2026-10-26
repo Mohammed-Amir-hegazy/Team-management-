@@ -178,6 +178,10 @@ test('task status with a reason', async () => {
 
   const dash = await manager('GET', '/api/dashboard');
   assert.equal(dash.data.team_blocked.length, 1);
+  assert.equal(dash.data.pending_asks, 0);
+  assert.equal(dash.data.setup, null, 'the first steps are for owners and admins only');
+  const setup = (await owner('GET', '/api/dashboard')).data.setup;
+  assert.ok(setup.users > 1 && setup.projects > 0 && setup.brand === 0, JSON.stringify(setup));
 
   // An employee cannot edit task details, only the status/reminder.
   assert.equal((await employee('PATCH', `/api/tasks/${task.id}`, { title: 'Hacked' })).status, 403);

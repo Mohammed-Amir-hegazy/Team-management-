@@ -18,6 +18,7 @@ import { themeButton, themeSwitch } from './theme.js';
 import { viewBrand } from './views/brand.js';
 import { viewAsks } from './views/asks.js';
 import { viewUpdates, showWhatsNew } from './views/updates.js';
+import { sideNavHtml, navSections, createMenu, openSearch, bindSearchKeys } from './nav.js';
 import {
   registerServiceWorker, initNativeApp, maybePromptPush, pushKind, pushEnabled, enablePush, forgetDevice,
 } from './device.js';
@@ -366,43 +367,34 @@ async function logout() {
 // Shell
 // ---------------------------------------------------------------------------
 
-function navItems() {
-  const me = state.me;
-  return [
-    me.is_platform ? ['platform', 'لوحة إدارة المنصة', 'layers'] : null,
-    ['dashboard', 'الرئيسية', 'home'],
-    ['projects', 'المشاريع', 'folder'],
-    ['tasks', 'المهام', 'tasks'],
-    ['reports', 'التقارير', 'report', 'reports'],
-    ['requests', 'الطلبات', 'box', 'requests'],
-    me.has_team ? ['team', 'متابعة الفريق', 'chart'] : null,
-    ['people', me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users'],
-    ['notifications', 'الإشعارات', 'bell', 'notifications'],
-    me.is_admin ? ['brand', 'هوية الشركة', 'palette'] : null,
-    me.is_admin ? ['subscription', 'الاشتراك', 'shield'] : null,
-  ].filter(Boolean);
-}
-
 function showApp() {
   $('#auth').classList.add('hidden');
   $('#shell').classList.remove('hidden');
   const me = state.me;
 
-  $('#side-nav').innerHTML = navItems().map(([key, label, ic, badge]) =>
-    `<a href="#/${key}" data-nav="${key}">${icon(ic)}<span>${label}</span>${badge ? `<span class="count hidden" data-count-for="${badge}"></span>` : ''}</a>`).join('');
+  $('#side-nav').innerHTML = sideNavHtml();
   drawSideUser();
   $('#side-user').onclick = accountSheet;
   $('#bell').innerHTML = `${icon('bell')}<span class="dot hidden" id="bell-dot"></span>`;
   if (!$('#topbar [data-theme-btn]')) $('#bell').insertAdjacentHTML('beforebegin', themeButton());
+  if (!$('#search-btn')) {
+    $('#topbar-title').insertAdjacentHTML('afterend', `<button type="button" class="search-btn" id="search-btn" aria-label="بحث سريع">
+      ${icon('search')}<span class="grow">ابحث أو انتقل إلى…</span><kbd>Ctrl K</kbd></button>`);
+    $('.topbar-actions').insertAdjacentHTML('afterbegin', `<button type="button" class="btn create-btn" id="create-btn">${icon('plus')}إنشاء</button>`);
+  }
+  $('#search-btn').onclick = openSearch;
+  $('#create-btn').onclick = createMenu;
 
+  const tab = ([key, label, ic, badge]) => `<a href="#/${key}" data-nav="${key}">${icon(ic)}<span>${label}</span>${
+    badge ? `<span class="count hidden" data-count-for="${badge}"></span>` : ''}</a>`;
   $('#tabbar').innerHTML = [
-    ['dashboard', 'الرئيسية', 'home'],
-    ['tasks', 'المهام', 'tasks'],
-    ['projects', 'المشاريع', 'folder'],
-    ['reports', 'التقارير', 'report', 'reports'],
-  ].map(([key, label, ic, badge]) => `<a href="#/${key}" data-nav="${key}">${icon(ic)}<span>${label}</span>${
-    badge ? `<span class="count hidden" data-count-for="${badge}"></span>` : ''}</a>`).join('')
-    + `<button type="button" id="more-btn">${icon('more')}<span>المزيد</span><span class="count hidden" data-count-for="more"></span></button>`;
+    tab(['dashboard', 'الرئيسية', 'home']),
+    tab(['tasks', 'المهام', 'tasks']),
+    `<button type="button" class="tab-create" id="tab-create" aria-label="إنشاء">${icon('plus')}<span>إنشاء</span></button>`,
+    tab(['projects', 'المشاريع', 'folder']),
+    `<button type="button" id="more-btn">${icon('more')}<span>المزيد</span><span class="count hidden" data-count-for="more"></span></button>`,
+  ].join('');
+  $('#tab-create').onclick = createMenu;
   $('#more-btn').onclick = moreSheet;
 
   try {
@@ -426,24 +418,24 @@ function sheetItem(href, label, ic, extra = '') {
 function moreSheet() {
   const c = state.counts;
   const badge = (n) => (n ? `<span class="pill red plain">${n}</span>` : '');
+  const counts = { requests: c.requests, reports: c.reports, notifications: c.notifications };
+  const sections = navSections().filter((sec) => sec.title);
   openModal({
     title: 'المزيد',
     className: 'menu-sheet',
-    body: `<div class="list">
-      ${sheetItem('#/requests', 'الطلبات', 'box', badge(c.requests))}
-      ${state.me.has_team ? sheetItem('#/team', 'متابعة الفريق وتقرير الأداء', 'chart') : ''}
-      ${sheetItem('#/people', state.me.is_admin ? 'المستخدمين' : 'الهيكل الوظيفي', 'users')}
-      ${sheetItem('#/notifications', 'الإشعارات', 'bell', badge(c.notifications))}
-      ${state.me.is_admin ? sheetItem('#/brand', 'هوية الشركة', 'palette') : ''}
-      ${state.me.is_admin ? sheetItem('#/subscription', 'الاشتراك', 'shield') : ''}
-      ${state.me.is_platform ? sheetItem('#/platform', 'لوحة إدارة المنصة', 'layers') : ''}
+    body: `<button type="button" class="search-btn block" data-search>${icon('search')}<span class="grow">ابحث عن مهمة أو مشروع أو شخص</span></button>
+      ${sections.map((sec) => `<div class="nav-group">${sec.title}</div><div class="list">${sec.items
+        .map(([key, label, ic, b, hint]) => sheetItem(`#/${key}`, `${label}<small>${esc(hint || '')}</small>`, ic, badge(counts[b]))).join('')}</div>`).join('')}
+      <div class="nav-group">الحساب</div><div class="list">
       ${sheetItem('#/updates', 'ما الجديد في المنصة', 'bolt')}
       <a class="item link" href="#" data-account>${icon('user')}<span class="grow">حسابي</span></a>
       <a class="item link" href="#" data-logout>${icon('logout')}<span class="grow">تسجيل الخروج</span></a>
     </div>`,
   }).el.addEventListener('click', (e) => {
-    if (e.target.closest('[data-account]')) { e.preventDefault(); e.target.closest('.modal-backdrop').remove(); accountSheet(); }
-    if (e.target.closest('[data-logout]')) { e.preventDefault(); e.target.closest('.modal-backdrop').remove(); logout(); }
+    const sheet = e.target.closest('.modal-backdrop');
+    if (e.target.closest('[data-search]')) { sheet.remove(); openSearch(); }
+    if (e.target.closest('[data-account]')) { e.preventDefault(); sheet.remove(); accountSheet(); }
+    if (e.target.closest('[data-logout]')) { e.preventDefault(); sheet.remove(); logout(); }
   });
 }
 
@@ -764,4 +756,5 @@ function showAlarm(alarms) {
   });
 }
 
+bindSearchKeys();
 boot();

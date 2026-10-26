@@ -62,7 +62,7 @@ export async function viewPeople({ query } = {}) {
   const el = render(`
     <div class="page-head">
       <div class="titles"><h1>${admin ? 'المستخدمين' : 'الهيكل الوظيفي'}</h1>
-        <div class="sub">${admin && seats.total ? `${seats.used} من ${seats.total} حسابات مستخدمة في باقتكم` : `${active} حساب نشط`} · تُرسل التقارير والطلبات إلى المسؤول المباشر فقط</div></div>
+        <div class="sub">${admin && seats.total ? `${seats.used} من ${seats.total} حسابات مستخدمة في باقتكم` : `${active} حساب نشط`} · تُرسل التقارير والطلبات إلى أي مسؤول أعلى في التسلسل</div></div>
       <div class="actions">${admin ? `<button class="btn" id="add-user">${icon('plus')}إضافة مستخدم</button>` : ''}</div>
     </div>
     ${!admin ? `<div class="callout blue">${icon('shield')}<div>إنشاء الحسابات وتعديل الأدوار من صلاحيات صاحب الشركة ومسؤول النظام.</div></div>` : ''}
@@ -107,7 +107,8 @@ export async function viewPeople({ query } = {}) {
     }
     const add = () => userModal(users, null);
     $('#add-user', el).addEventListener('click', add);
-    setFab('إضافة مستخدم', add);
+    setFab('مستخدم جديد', add);
+    if (query && query.get('add')) add();
   } else {
     setFab(null);
   }

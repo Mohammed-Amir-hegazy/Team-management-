@@ -245,7 +245,7 @@ export async function viewReports({ query }) {
 
   const el = render(`
     <div class="page-head">
-      <div class="titles"><h1>التقارير</h1><div class="sub">تُرسل التقارير إلى المسؤول المباشر وتتضمن حالة العمل كاملة</div></div>
+      <div class="titles"><h1>التقارير</h1><div class="sub">تُرسل التقارير إلى مسؤولك المباشر أو أي مسؤول أعلى، وتتضمن حالة العمل كاملة</div></div>
       <div class="actions">
         ${me.supervisor_id ? `<button class="btn" id="new-report">${icon('send')}تقرير جديد</button>` : ''}
         ${me.has_team ? `<a class="btn ghost" href="#/team">${icon('download')}تقرير الفريق الشامل</a>` : ''}

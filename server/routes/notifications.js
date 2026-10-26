@@ -68,9 +68,19 @@ module.exports = function register(router) {
     const counts = await db.get(`
       SELECT
         (SELECT COUNT(*) FROM reports WHERE recipient_id = ? AND read_at IS NULL) AS unread_reports,
-        (SELECT COUNT(*) FROM requests WHERE recipient_id = ? AND status = 'pending') AS pending_requests
-    `, user.id, user.id);
+        (SELECT COUNT(*) FROM requests WHERE recipient_id = ? AND status = 'pending') AS pending_requests,
+        (SELECT COUNT(*) FROM work_requests WHERE recipient_id = ? AND status = 'pending') AS pending_asks
+    `, user.id, user.id, user.id);
+    // First steps for a new company, shown to its owner and admins until they are done.
+    const setup = isAdmin(user) ? await db.get(`
+      SELECT
+        (SELECT COUNT(*) FROM users WHERE company_id = ? AND active = 1 AND deleted_at IS NULL) AS users,
+        (SELECT COUNT(*) FROM projects WHERE company_id = ? AND personal_owner_id IS NULL) AS projects,
+        (SELECT COUNT(*) FROM company_brands WHERE company_id = ?) AS brand,
+        (SELECT COUNT(*) FROM users WHERE company_id = ? AND active = 1 AND deleted_at IS NULL AND gender = '') AS no_gender
+    `, user.company_id, user.company_id, user.company_id, user.company_id) : null;
     return {
+      setup,
       my_tasks_by_status: byStatus,
       overdue: mine.filter((t) => t.deadline < ts),
       upcoming: mine.filter((t) => t.deadline >= ts),

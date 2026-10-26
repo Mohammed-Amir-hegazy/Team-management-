@@ -49,7 +49,7 @@ export async function viewProjects() {
   }
 }
 
-async function newProjectModal() {
+export async function newProjectModal() {
   const { users } = await api('GET', '/api/users');
   const team = users.filter((u) => u.in_my_team && u.active);
   openModal({
