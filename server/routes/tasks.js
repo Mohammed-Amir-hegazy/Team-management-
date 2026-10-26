@@ -30,7 +30,8 @@ function checkReminder(deadline, reminderAt) {
 }
 
 // Shared by project tasks and standalone tasks (project = null → the assignee's personal container).
-async function createTask(db, user, project, body) {
+// options.silent: no "assigned to you" notice (the caller sends its own).
+async function createTask(db, user, project, body, { silent = false, recurringId = null } = {}) {
   const title = v.text(body.title, 'عنوان المهمة', { max: 300 });
   const description = v.text(body.description, 'الوصف', { required: false, max: 10000 });
   const assigneeId = v.id(body.assignee_id ?? user.id, 'المسؤول عن المهمة');
@@ -60,7 +61,8 @@ async function createTask(db, user, project, body) {
     const taskId = r.lastInsertRowid;
     await tx.run('INSERT INTO task_status_history (task_id, user_id, from_status, to_status, note, created_at) VALUES (?, ?, NULL, ?, ?, ?)',
       taskId, user.id, 'todo', 'تم إنشاء المهمة', ts);
-    if (assigneeId !== user.id) {
+    if (recurringId) await tx.run('UPDATE tasks SET recurring_id = ? WHERE id = ?', recurringId, taskId);
+    if (assigneeId !== user.id && !silent) {
       await notify(tx, assigneeId, 'task', `${byGender(user, 'أسند', 'أسندت')} إليك ${user.name} مهمة جديدة: «${title}»`, `#/tasks/${taskId}`);
     }
     return taskId;

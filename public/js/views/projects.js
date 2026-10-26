@@ -5,6 +5,7 @@ import {
 } from '../core.js';
 import { taskFormModal, sendRequirementsModal } from './tasks.js';
 import { composeReport } from './reports.js';
+import { recurringSection } from './recurring.js';
 
 // Everyone can start a project; members can only be chosen from one's own team.
 const canCreateProjects = () => true;
@@ -133,7 +134,9 @@ export async function viewProject({ id }) {
           ${m.removable && m.id !== p.created_by ? `<button class="icon-btn" data-remove-member="${m.id}" aria-label="إزالة ${esc(m.name)}">${icon('x')}</button>` : ''}
         </div>`).join('')}</div>
       </aside>
-    </div>`);
+    </div>
+    <section class="card" id="recurring-box" style="margin-top:1rem"></section>`);
+  recurringSection($('#recurring-box', el), p, can.manage);
 
   $$('[data-filter]', el).forEach((b) => b.addEventListener('click', () => {
     remember(filterKey, b.dataset.filter);

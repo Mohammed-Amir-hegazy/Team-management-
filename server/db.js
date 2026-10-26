@@ -170,6 +170,28 @@ CREATE TABLE IF NOT EXISTS password_resets (
   window_count INTEGER NOT NULL DEFAULT 1
 );
 
+-- Follow-ups that repeat: on each due date a task is created for the person responsible, in the project.
+CREATE TABLE IF NOT EXISTS recurring_tasks (
+  id            INTEGER PRIMARY KEY,
+  company_id    INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+  project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  created_by    INTEGER NOT NULL REFERENCES users(id),
+  assignee_id   INTEGER NOT NULL REFERENCES users(id),
+  title         TEXT NOT NULL,
+  description   TEXT NOT NULL DEFAULT '',
+  priority      TEXT NOT NULL DEFAULT 'medium',
+  every_n       INTEGER NOT NULL DEFAULT 1,
+  unit          TEXT NOT NULL DEFAULT 'week' CHECK (unit IN ('day', 'week', 'month')),
+  duration_days INTEGER NOT NULL DEFAULT 1,
+  next_run_at   TEXT NOT NULL,
+  active        INTEGER NOT NULL DEFAULT 1,
+  last_task_id  INTEGER,
+  runs          INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_due ON recurring_tasks(active, next_run_at);
+CREATE INDEX IF NOT EXISTS idx_recurring_project ON recurring_tasks(project_id);
+
 -- Values the platform makes for itself once and keeps (e.g. its Web Push keys).
 CREATE TABLE IF NOT EXISTS app_settings (
   key   TEXT PRIMARY KEY,
@@ -370,6 +392,8 @@ const ADDED_COLUMNS = [
   ['work_requests', 'kind', "TEXT NOT NULL DEFAULT 'colleague'"],
   // 'male' / 'female', for addressing people correctly in messages; '' until set.
   ['users', 'gender', "TEXT NOT NULL DEFAULT ''"],
+  // The recurring follow-up a task was created from, if any.
+  ['tasks', 'recurring_id', 'INTEGER'],
 ];
 
 async function migrate(db) {

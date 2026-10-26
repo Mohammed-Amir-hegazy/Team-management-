@@ -10,7 +10,7 @@ const { migrate } = require('./db');
 // Parents before children. Short-lived rows (login codes, password resets) are not worth carrying over.
 const TABLES = [
   'companies', 'company_brands', 'users', 'user_photos', 'subscription_events', 'sessions', 'projects', 'project_members', 'tasks',
-  'work_requests', 'task_status_history', 'requests', 'requirements', 'reports', 'attachments', 'images', 'notifications',
+  'recurring_tasks', 'work_requests', 'task_status_history', 'requests', 'requirements', 'reports', 'attachments', 'images', 'notifications',
 ];
 
 async function columnsOf(execute, table) {

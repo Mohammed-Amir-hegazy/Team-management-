@@ -4,6 +4,7 @@ const { now } = require('../db');
 const v = require('../validate');
 const { subordinateIds, isAdmin } = require('../access');
 const { releasesFor } = require('../releases');
+const { runRecurringSoon } = require('./recurring');
 
 const TASK_SQL = `
   SELECT t.*, CASE WHEN p.personal_owner_id IS NULL THEN p.name ELSE 'مهمة مستقلة' END AS project_name, u.name AS assignee_name FROM tasks t
@@ -17,6 +18,8 @@ module.exports = function register(router) {
 
   // Polled by the browser: latest notifications plus the sidebar badge counters, in two queries.
   router.get('/api/notifications', async ({ db, user }) => {
+    // Polled by every open app: also the moment to create recurring follow-ups that came due.
+    runRecurringSoon(db);
     const notifications = await db.all('SELECT * FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 50', user.id);
     const counts = await db.get(`
       SELECT

@@ -41,6 +41,7 @@ function createApp(db, {
   require('./routes/uploads')(router);
   require('./routes/brand')(router);
   require('./routes/push')(router);
+  require('./routes/recurring')(router);
   require('./routes/subscription')(router);
   require('./routes/platform')(router);
 

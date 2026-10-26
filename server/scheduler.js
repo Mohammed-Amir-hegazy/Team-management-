@@ -5,6 +5,7 @@
 const { getUser, notify } = require('./access');
 const { runSubscriptionReminders } = require('./subscription');
 const { purgeOrphanImages } = require('./images');
+const { runRecurring } = require('./routes/recurring');
 
 const DUE_REMINDERS = `
   SELECT * FROM tasks
@@ -49,6 +50,7 @@ function startScheduler(db, { intervalMs = 30000, messenger = null } = {}) {
     running = true;
     try {
       await runReminders(db);
+      await runRecurring(db);
       await db.run('DELETE FROM sessions WHERE expires_at < ?', new Date().toISOString());
       // Renewal reminders are day-based, so an hourly look is plenty.
       if (Date.now() - lastSubscriptionCheck > 3600 * 1000) {

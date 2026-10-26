@@ -1006,3 +1006,9 @@ textarea.msg-edit { min-height: 220px; line-height: 1.75; font-size: .92rem; res
   border-radius: 14px; background: var(--primary-soft); color: var(--text); font-size: .9rem; animation: fadeUp .4s var(--ease) both; }
 .push-prompt > svg { width: 20px; height: 20px; color: var(--primary); flex-shrink: 0; }
 @media (max-width: 900px) { .push-prompt { margin: .6rem 1rem 0; } }
+
+/* Recurring follow-ups */
+.repeat-row { display: flex; align-items: center; gap: .5rem; }
+.repeat-row input { width: 5.5rem; text-align: center; }
+.repeat-row select { flex: 1; }
+.item.recurring.paused { opacity: .6; }

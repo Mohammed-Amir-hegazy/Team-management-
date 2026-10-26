@@ -169,6 +169,7 @@ export async function viewTask({ id }) {
         <h1>${esc(t.title)}</h1>
         <div class="row wrap" style="margin-top:.4rem;gap:.4rem">${statusPill(t.status)}
           <span class="pill plain ${t.priority === 'high' ? 'red' : t.priority === 'medium' ? 'amber' : 'gray'}">${icon('flag')} أولوية ${PRIORITY_LABELS[t.priority]}</span>
+          ${t.recurring_id ? '<span class="pill blue plain">🔁 متابعة دورية</span>' : ''}
           ${dl.late ? `<span class="pill red plain">${icon('clock')} متأخرة</span>` : ''}</div>
       </div>
       <div class="actions">

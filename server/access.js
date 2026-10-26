@@ -230,6 +230,7 @@ async function purgeRequests(db, requestIdsSql, ...args) {
 }
 
 async function deleteProject(db, projectId) {
+  await db.run('DELETE FROM recurring_tasks WHERE project_id = ?', projectId);
   await purgeTasks(db, 'SELECT id FROM tasks WHERE project_id = ?', projectId);
   await purgeRequests(db, 'SELECT id FROM requests WHERE project_id = ?', projectId);
   await db.run('UPDATE reports SET project_id = NULL WHERE project_id = ?', projectId);

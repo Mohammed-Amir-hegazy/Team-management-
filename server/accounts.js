@@ -64,11 +64,16 @@ async function deleteAccount(db, target, actor) {
       }
       // Requests still waiting on the target now wait on the supervisor.
       await tx.run("UPDATE requests SET recipient_id = ? WHERE recipient_id = ? AND status = 'pending'", supervisor.id, target.id);
+      // Recurring follow-ups they ran or set up continue under the supervisor.
+      await tx.run('UPDATE recurring_tasks SET assignee_id = ? WHERE assignee_id = ?', supervisor.id, target.id);
+      await tx.run('UPDATE recurring_tasks SET created_by = ? WHERE created_by = ?', supervisor.id, target.id);
       await notify(tx, supervisor.id, 'task', moved
         ? `حُذف حساب ${target.name}، وأُسندت إليك مهامه المفتوحة (${moved}) وفريقه وطلباته المعلّقة`
         : `حُذف حساب ${target.name}، وانتقل فريقه وطلباته المعلّقة إليك`, '#/tasks');
     }
 
+    // With nobody to take them over, their recurring follow-ups pause.
+    await tx.run('UPDATE recurring_tasks SET active = 0 WHERE assignee_id = ? OR created_by = ?', target.id, target.id);
     // Requests waiting on the deleted person can no longer be answered.
     await tx.run(`UPDATE work_requests SET status = 'cancelled', responded_at = ? WHERE status = 'pending'
       AND (recipient_id = ? OR sender_id = ?)`, ts, target.id, target.id);
