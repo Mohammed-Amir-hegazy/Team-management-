@@ -5,7 +5,7 @@ const { now } = require('../db');
 const v = require('../validate');
 const {
   requireSupervisor, subordinateIds, loadProject, loadTask, notify, publicUser, roleRank,
-  chooseManager, byGender, colleagueName,
+  chooseManager, byGender, colleagueName, getUser,
 } = require('../access');
 const {
   TASK_FIELDS, TASK_FROM, placeholders, markOverdue, summarize, memberStats, workSnapshot, EMPTY_STATS,
@@ -52,6 +52,15 @@ async function loadReport(db, user, reportId) {
   return report;
 }
 
+// The result of a recurring follow-up may also go to whoever set the follow-up up, even when that person
+// is not above the sender.
+async function followUpRecipient(db, user, task, recipientId) {
+  if (!task || !task.recurring_id || !recipientId || Number(recipientId) !== task.created_by || task.created_by === user.id) return null;
+  const creator = await getUser(db, task.created_by);
+  if (!creator || !creator.active || creator.deleted_at) throw new HttpError(400, 'صاحب المتابعة غير متاح حاليًا');
+  return creator;
+}
+
 function periodFrom(query) {
   const to = query.get('to') ? new Date(query.get('to')) : new Date();
   const from = query.get('from') ? new Date(query.get('from')) : new Date(to.getTime() - 7 * 24 * 3600 * 1000);
@@ -88,13 +97,15 @@ module.exports = function register(router) {
 
   // To any manager above the sender (the direct supervisor unless another is chosen).
   router.post('/api/reports', async ({ db, user, body, config }) => {
-    const supervisor = await chooseManager(db, user, body.recipient_id);
     const title = v.text(body.title, 'عنوان التقرير', { max: 300 });
     const text = v.text(body.body, 'نص التقرير', { max: 20000 });
     let projectId = v.optionalId(body.project_id, 'المشروع');
     const taskId = v.optionalId(body.task_id, 'المهمة');
-    if (taskId) projectId = (await loadTask(db, user, taskId)).task.project_id;
+    const task = taskId ? (await loadTask(db, user, taskId)).task : null;
+    if (task) projectId = task.project_id;
     else if (projectId) await loadProject(db, user, projectId);
+    const supervisor = await followUpRecipient(db, user, task, body.recipient_id)
+      || await chooseManager(db, user, body.recipient_id);
     const snapshot = body.include_status === false ? null
       : JSON.stringify(await workSnapshot(db, user, { projectId, taskId }));
     const images = Array.isArray(body.images) && body.images.length ? await validateImages(db, config, user, body.images) : [];

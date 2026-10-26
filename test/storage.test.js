@@ -158,10 +158,10 @@ test('each platform update is announced once to every company, with steps for it
   assert.ok(!emails.some((e) => e.email === 'e@r1.co'));
 
   // The "what's new" sheet: steps only for owners and admins.
-  assert.ok((await o('GET', '/api/releases')).data.releases[0].actions.length > 0);
+  assert.ok((await o('GET', '/api/releases')).data.releases.some((r) => r.actions.length > 0));
   const e = client(app.base);
   await e('POST', '/api/login', { email: 'e@r1.co', password: 'secret123' });
-  assert.equal((await e('GET', '/api/releases')).data.releases[0].actions.length, 0);
+  assert.ok((await e('GET', '/api/releases')).data.releases.every((r) => r.actions.length === 0));
   app.server.close();
   db.close();
 });

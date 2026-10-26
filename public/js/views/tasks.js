@@ -2,7 +2,7 @@ import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal, confirmDialog, attempt, busy,
   STATUS_LABELS, STATUSES, PRIORITY_LABELS, REQUEST_STATUS,
   statusPill, pill, avatar, taskList, tabs, onTabs, remember, deadlineInfo, fmtDateTime, relTime,
-  toLocalInput, fromLocalInput, plural, ITEMS_N, formData, managerPicker,
+  toLocalInput, fromLocalInput, plural, ITEMS_N, formData, managerPicker, isScheduled,
 } from '../core.js';
 import { composeReport } from './reports.js';
 import { gallery, bindGallery, photoUploadModal } from '../uploads.js';
@@ -159,6 +159,9 @@ export async function viewTask({ id }) {
   const drafts = requirements.filter((r) => !r.request_id && r.requested_by === me.id);
   const sent = requirements.filter((r) => r.request_id);
   const dl = deadlineInfo(t.deadline, t.status);
+  // The person responsible for a recurring follow-up reports its result (with photos) from here.
+  const followUpResult = t.recurring_id && t.assignee_id === me.id && (me.supervisor_id || t.created_by !== me.id);
+  const reports = data.reports || [];
 
   const el = render(`
     <div class="page-head">
@@ -170,11 +173,13 @@ export async function viewTask({ id }) {
         <div class="row wrap" style="margin-top:.4rem;gap:.4rem">${statusPill(t.status)}
           <span class="pill plain ${t.priority === 'high' ? 'red' : t.priority === 'medium' ? 'amber' : 'gray'}">${icon('flag')} أولوية ${PRIORITY_LABELS[t.priority]}</span>
           ${t.recurring_id ? '<span class="pill blue plain">🔁 متابعة دورية</span>' : ''}
+          ${isScheduled(t) ? `<span class="pill amber plain">📅 مجدولة بتاريخ ${esc(fmtDateTime(t.reminder_at))}</span>` : ''}
           ${dl.late ? `<span class="pill red plain">${icon('clock')} متأخرة</span>` : ''}</div>
       </div>
       <div class="actions">
         ${can.remind ? `<button class="btn subtle" id="remind-task">${icon('bell')}تذكير ${esc(t.assignee_name.split(' ')[0])}</button>` : ''}
-        ${me.supervisor_id ? `<button class="btn ghost" id="task-report">${icon('send')}تقرير عن المهمة</button>` : ''}
+        ${followUpResult ? `<button class="btn" id="follow-up-result">${icon('send')}إرسال نتيجة المتابعة</button>`
+          : me.supervisor_id ? `<button class="btn ghost" id="task-report">${icon('send')}تقرير عن المهمة</button>` : ''}
         ${can.edit ? `<button class="btn ghost" id="edit-task">${icon('edit')}تعديل</button>
           <button class="btn ghost" id="delete-task" aria-label="حذف المهمة">${icon('trash')}</button>` : ''}
       </div>
@@ -196,6 +201,17 @@ export async function viewTask({ id }) {
             <button class="btn" type="submit">${icon('check')}تحديث الحالة</button>
           </form>` : '<p class="muted">يمكن للمسؤول عن المهمة أو من يعلوه تحديث حالتها.</p>'}
         </section>
+
+        ${t.recurring_id || reports.length ? `<section class="card">
+          <div class="card-head"><h2>${t.recurring_id ? 'نتائج المتابعة' : 'التقارير عن المهمة'}</h2><span class="muted small">${reports.length || ''}</span></div>
+          ${reports.length ? `<div class="list">${reports.map((r) => `<a class="item link" href="#/reports/${r.id}">
+            ${icon('report')}<div class="grow"><div class="title">${esc(r.title)}</div>
+              <div class="meta">${esc(r.sender_name)} ← ${esc(r.recipient_name)} · ${esc(fmtDateTime(r.created_at))}${
+                r.image_count ? ` · ${icon('camera')} ${r.image_count}` : ''}</div></div></a>`).join('')}</div>`
+            : `<p class="muted" style="margin:0">${followUpResult
+              ? 'بعد تنفيذ المتابعة اضغط «إرسال نتيجة المتابعة» واكتب ما وجدته، ويمكنك إرفاق صور.'
+              : 'لم تُرسل نتيجة هذه المتابعة بعد.'}</p>`}
+        </section>` : ''}
 
         <section class="card">
           <div class="card-head"><h2>صور داعمة للتنفيذ</h2><span class="muted small">${data.attachments.length || ''}</span>
@@ -281,6 +297,13 @@ export async function viewTask({ id }) {
 
   const report = $('#task-report', el);
   if (report) report.addEventListener('click', () => composeReport({ task_id: t.id, label: `المهمة: ${t.title}` }));
+  const result = $('#follow-up-result', el);
+  if (result) result.addEventListener('click', () => composeReport({
+    task_id: t.id,
+    label: `المتابعة: ${t.title}`,
+    title: `نتيجة المتابعة: ${t.title}`,
+    followUp: { owner: { id: t.created_by, name: t.creator_name }, can_complete: can.update_status && t.status !== 'done' },
+  }));
   if (can.edit) {
     $('#edit-task', el).addEventListener('click', () => taskFormModal({ task: t, assignable: data.assignable_users }));
     $('#delete-task', el).addEventListener('click', () => confirmDialog('سيتم حذف المهمة وسجلها ومتطلباتها نهائيًا. هل تريد المتابعة؟', async () => {

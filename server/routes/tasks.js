@@ -138,6 +138,14 @@ module.exports = function register(router) {
       SELECT a.*, u.name AS uploaded_by_name FROM attachments a JOIN users u ON u.id = a.uploaded_by
       WHERE a.task_id = ? ORDER BY a.created_at DESC
     `, task.id);
+    // Reports about this task (a follow-up's results among them) that this person may open.
+    const reports = (await db.all(`
+      SELECT r.id, r.title, r.created_at, r.sender_id, r.recipient_id, s.name AS sender_name, t.name AS recipient_name,
+             (SELECT COUNT(*) FROM attachments a WHERE a.report_id = r.id) AS image_count
+      FROM reports r JOIN users s ON s.id = r.sender_id JOIN users t ON t.id = r.recipient_id
+      WHERE r.task_id = ? ORDER BY r.created_at DESC, r.id DESC
+    `, task.id)).filter((r) => r.sender_id === user.id || r.recipient_id === user.id || subs.has(r.sender_id)
+      || (user.role === 'owner' && user.company_id === project.company_id));
     const editable = await canEditTask(db, user, task);
     const assignee = await getUser(db, task.assignee_id);
     const canWork = await canUpdateTaskStatus(db, user, task);
@@ -152,6 +160,7 @@ module.exports = function register(router) {
       attachments: attachments.map((a) => ({ ...a, deletable: a.uploaded_by === user.id || editable })),
       history,
       requirements,
+      reports,
       assignable_users: editable ? await assignableMembers(db, user, project.id) : [],
       permissions: {
         edit: editable,

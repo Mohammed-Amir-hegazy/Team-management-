@@ -434,8 +434,9 @@ test('each person has a gender that shapes the wording of messages', async () =>
   assert.ok(empNotes.some((m) => m.startsWith('طلبت منك الزميلة Admin')), empNotes.join(' | '));
 });
 
-test('recurring follow-ups create a task for the person responsible on every due date', async () => {
+test('recurring follow-ups keep their next occurrence scheduled as a task for the person responsible', async () => {
   const { runRecurring, advance, everyLabel } = require('../server/routes/recurring');
+  const { runReminders } = require('../server/scheduler');
   assert.equal(advance('2026-01-31T09:00:00.000Z', 1, 'month'), '2026-02-28T09:00:00.000Z', 'month end is kept');
   assert.equal(advance('2026-03-01T09:00:00.000Z', 2, 'week'), '2026-03-15T09:00:00.000Z');
   assert.equal(everyLabel(1, 'week'), 'كل أسبوع');
@@ -449,46 +450,64 @@ test('recurring follow-ups create a task for the person responsible on every due
   const outsider = (await client()('POST', '/api/signup', { company_name: 'Other2', name: 'X', email: 'x@other2.co', password: 'secret123' })).data.user;
   const proj = (await boss('POST', '/api/projects', { name: 'Site maintenance', member_ids: [emp.id] })).data.project;
 
-  const later = new Date(Date.now() + 2 * 864e5).toISOString();
-  assert.equal((await boss('POST', `/api/projects/${proj.id}/recurring`, { title: 'x', every_n: 0, unit: 'week', next_run_at: later })).status, 400);
-  assert.equal((await boss('POST', `/api/projects/${proj.id}/recurring`, { title: 'x', every_n: 1, unit: 'week', next_run_at: later, assignee_id: outsider.id })).status, 403);
+  const first = new Date(Date.now() + 2 * 864e5).toISOString();
+  assert.equal((await boss('POST', `/api/projects/${proj.id}/recurring`, { title: 'x', every_n: 0, unit: 'week', next_run_at: first })).status, 400);
+  assert.equal((await boss('POST', `/api/projects/${proj.id}/recurring`, { title: 'x', every_n: 1, unit: 'week', next_run_at: first, assignee_id: outsider.id })).status, 403);
   const made = await boss('POST', `/api/projects/${proj.id}/recurring`, {
     title: 'Weekly site check', description: 'Check backups and uptime', every_n: 1, unit: 'week', duration_days: 2,
-    next_run_at: later, assignee_id: emp.id, priority: 'high',
+    next_run_at: first, assignee_id: emp.id, priority: 'high',
   });
   assert.equal(made.status, 200, JSON.stringify(made.data));
-  assert.equal(made.data.recurring.every_label, 'كل أسبوع');
-  assert.equal(made.data.recurring.runs, 0, 'not due yet');
-  const e = client(); await e('POST', '/api/login', { email: 'e@follow.co', password: 'secret123' });
-  assert.ok((await e('GET', '/api/notifications')).data.notifications.some((n) => n.message.includes('أُسندت إليك متابعة دورية')));
-
-  // Its date arrives: one task for the employee, with an alarm and a deadline two days later.
   const id = made.data.recurring.id;
-  assert.equal(await runRecurring(db, new Date(Date.now() + 2 * 864e5 + 60000)), 1);
-  assert.equal(await runRecurring(db, new Date(Date.now() + 2 * 864e5 + 120000)), 0, 'once per period');
-  const row = await db.get('SELECT * FROM recurring_tasks WHERE id = ?', id);
-  assert.equal(row.next_run_at, advance(later, 1, 'week'));
-  const task = (await e('GET', `/api/tasks/${row.last_task_id}`)).data.task;
-  assert.equal(task.title, 'Weekly site check');
-  assert.equal(task.assignee_id, emp.id);
-  assert.equal(task.priority, 'high');
-  assert.equal(task.project_id, proj.id);
-  assert.equal(task.reminder_at, later);
-  assert.equal(task.deadline, new Date(Date.parse(later) + 2 * 864e5).toISOString());
-  assert.ok((await e('GET', '/api/notifications')).data.notifications.some((n) => n.type === 'reminder' && n.message.includes('حان موعد المتابعة')));
+  assert.equal(made.data.recurring.every_label, 'كل أسبوع');
 
-  // Five weeks asleep: one task, and the next date is in the future.
-  const asleep = new Date(Date.parse(later) + 36 * 864e5);
-  assert.equal(await runRecurring(db, asleep), 1);
+  // Scheduled at once: the employee already sees it in their tasks, dated, with the alarm set for that date.
+  assert.equal(made.data.recurring.runs, 1);
+  assert.equal(made.data.recurring.next_run_at, advance(first, 1, 'week'));
+  const e = client(); await e('POST', '/api/login', { email: 'e@follow.co', password: 'secret123' });
+  const mine = (await e('GET', '/api/tasks')).data.tasks.filter((t) => t.recurring_id === id);
+  assert.equal(mine.length, 1);
+  assert.equal(mine[0].reminder_at, first);
+  assert.equal(mine[0].deadline, new Date(Date.parse(first) + 2 * 864e5).toISOString());
+  assert.equal(mine[0].priority, 'high');
+  assert.ok((await e('GET', '/api/notifications')).data.notifications.some((n) => n.message.startsWith('📅 جُدولت لك المتابعة الدورية')));
+  assert.equal(await runRecurring(db, new Date(Date.now() + 864e5)), 0, 'the next one waits until this one is due');
+
+  // Its date arrives: the alarm rings, and the following occurrence is scheduled.
+  const onDate = new Date(Date.parse(first) + 60000);
+  await runReminders(db, onDate);
+  assert.ok((await e('GET', '/api/notifications')).data.notifications.some((n) => n.type === 'reminder' && n.message.includes('Weekly site check')));
+  assert.equal(await runRecurring(db, onDate), 1);
+  assert.equal(await runRecurring(db, onDate), 0, 'once per occurrence');
+  assert.equal((await db.get('SELECT next_run_at FROM recurring_tasks WHERE id = ?', id)).next_run_at, advance(advance(first, 1, 'week'), 1, 'week'));
+
+  // The result goes up as a report on the follow-up task, and shows on the follow-up.
+  const task = (await e('GET', '/api/tasks')).data.tasks.find((t) => t.recurring_id === id && t.reminder_at === first);
+  const rep = await e('POST', '/api/reports', { title: 'نتيجة المتابعة', body: 'All good', task_id: task.id, recipient_id: me.id });
+  assert.equal(rep.status, 200, JSON.stringify(rep.data));
+  assert.equal((await boss('GET', `/api/projects/${proj.id}/recurring`)).data.recurring[0].last_report_id, rep.data.report.id);
+  const results = (await boss('GET', `/api/tasks/${task.id}`)).data.reports;
+  assert.deepEqual(results.map((r) => r.id), [rep.data.report.id], 'the result shows on the follow-up task');
+  assert.equal((await e('POST', '/api/tasks/' + task.id + '/status', { status: 'done', note: 'أُرسلت نتيجة المتابعة' })).status, 200);
+  assert.equal((await e('POST', '/api/reports', { title: 't', body: 'b', task_id: task.id, recipient_id: outsider.id })).status, 403);
+
+  // Paused: the untouched upcoming task is withdrawn; resumed: it comes back on the same date.
+  const before = (await db.get('SELECT COUNT(*) AS n FROM tasks WHERE recurring_id = ?', id)).n;
+  const upcomingDate = (await db.get('SELECT reminder_at FROM tasks WHERE id = (SELECT last_task_id FROM recurring_tasks WHERE id = ?)', id)).reminder_at;
+  assert.equal((await boss('PATCH', `/api/recurring/${id}`, { active: false })).data.recurring.active, false);
+  assert.equal((await db.get('SELECT COUNT(*) AS n FROM tasks WHERE recurring_id = ?', id)).n, before - 1);
+  assert.equal(await runRecurring(db, new Date(Date.parse(first) + 400 * 864e5)), 0);
+  await boss('PATCH', `/api/recurring/${id}`, { active: true });
+  assert.equal(await runRecurring(db, onDate), 1);
+  const back = await db.get('SELECT reminder_at FROM tasks WHERE id = (SELECT last_task_id FROM recurring_tasks WHERE id = ?)', id);
+  assert.equal(back.reminder_at, upcomingDate, 'the same date comes back');
+
+  // Months asleep: past dates are skipped, the next upcoming one is scheduled.
+  const asleep = new Date(Date.parse(first) + 60 * 864e5);
+  await runRecurring(db, asleep);
   assert.ok((await db.get('SELECT next_run_at FROM recurring_tasks WHERE id = ?', id)).next_run_at > asleep.toISOString());
 
-  // Paused: nothing more; listed on the project with its schedule.
-  assert.equal((await boss('PATCH', `/api/recurring/${id}`, { active: false })).data.recurring.active, false);
-  assert.equal(await runRecurring(db, new Date(Date.parse(later) + 400 * 864e5)), 0);
-  const list = (await e('GET', `/api/projects/${proj.id}/recurring`)).data.recurring;
-  assert.equal(list.length, 1);
-  assert.equal(list[0].runs, 2);
   assert.equal((await e('DELETE', `/api/recurring/${id}`)).status, 403, 'the employee cannot remove it');
   assert.equal((await boss('DELETE', `/api/recurring/${id}`)).status, 200);
-  assert.equal((await db.get('SELECT COUNT(*) AS n FROM tasks WHERE project_id = ?', proj.id)).n, 2, 'tasks already made stay');
+  assert.ok((await db.get('SELECT COUNT(*) AS n FROM tasks WHERE project_id = ?', proj.id)).n >= 2, 'tasks already due stay');
 });

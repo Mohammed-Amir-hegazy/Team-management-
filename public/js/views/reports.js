@@ -131,30 +131,41 @@ export function shareReportOnWhatsApp(report) {
 // Compose
 // ---------------------------------------------------------------------------
 
-export async function composeReport({ project_id: projectId = null, task_id: taskId = null, label = '' } = {}) {
+// followUp: { owner: {id, name}, task_id } — the result of a recurring follow-up: may go to whoever set it up,
+// and can mark the follow-up task done once sent.
+export async function composeReport({
+  project_id: projectId = null, task_id: taskId = null, label = '', title = '', followUp = null,
+} = {}) {
   const me = state.me;
-  if (!me.supervisor_id) {
+  const owner = followUp && followUp.owner && followUp.owner.id !== me.id ? followUp.owner : null;
+  if (!me.supervisor_id && !owner) {
     toast('لا يوجد مسؤول مباشر أعلى منك لإرسال التقرير إليه', { error: true });
     return;
   }
   const projects = !projectId && !taskId ? (await api('GET', '/api/projects')).projects : [];
   const images = [];
   const { form } = openModal({
-    title: 'تقرير جديد',
+    title: followUp ? 'نتيجة المتابعة' : 'تقرير جديد',
     wide: true,
     body: `
-      ${managerPicker('يُرسل التقرير إلى')}
+      ${managerPicker('يُرسل التقرير إلى', 'recipient_id', {
+        selected: owner ? owner.id : null,
+        extra: owner ? [{ id: owner.id, name: owner.name, note: 'صاحب المتابعة' }] : [],
+      })}
       ${label ? `<div class="muted small" style="margin:-.4rem 0 .8rem">بخصوص ${esc(label)}</div>` : ''}
       ${projects.length ? `<div class="field"><label>نطاق التقرير</label><select name="scope">
         <option value="">جميع أعمالي</option>
         ${projects.map((p) => `<option value="${p.id}">مشروع: ${esc(p.name)}</option>`).join('')}</select></div>` : ''}
-      <div class="field"><label>عنوان التقرير</label><input name="title" required value="تقرير حالة العمل — ${esc(fmtDate(new Date().toISOString()))}"></div>
+      <div class="field"><label>عنوان التقرير</label><input name="title" required value="${esc(title || `تقرير حالة العمل — ${fmtDate(new Date().toISOString())}`)}"></div>
       <div class="field"><label>نص التقرير</label><textarea name="body" rows="6" required
-        placeholder="ما الذي أُنجز؟ وما العوائق الحالية؟ وما الخطوات القادمة؟"></textarea></div>
+        placeholder="${followUp ? 'ما الذي وجدته في المتابعة؟ وما الملاحظات أو المشكلات؟ وما المطلوب بعدها؟'
+          : 'ما الذي أُنجز؟ وما العوائق الحالية؟ وما الخطوات القادمة؟'}"></textarea></div>
       ${state.config.uploads ? `<div class="field"><div class="row"><label>صور مرفقة</label>
         <button type="button" class="btn sm subtle" id="add-report-photos" style="margin-inline-start:auto">${icon('camera')}إرفاق صور</button></div>
         <div id="report-photos"></div><div id="report-progress"></div></div>` : ''}
-      <label class="switch" style="margin-bottom:.7rem"><input type="checkbox" name="include_status" checked>
+      ${followUp && followUp.can_complete ? `<label class="switch" style="margin-bottom:.7rem"><input type="checkbox" name="complete_follow_up" checked>
+        تعليم مهمة المتابعة «مكتملة» بعد الإرسال</label>` : ''}
+      <label class="switch" style="margin-bottom:.7rem"><input type="checkbox" name="include_status" ${followUp ? '' : 'checked'}>
         إرفاق حالة العمل تلقائيًا (المهام وحالاتها وأسباب التوقف وصورها${me.has_team ? ' وملخص الفريق' : ''})</label>
       <div id="snap-preview" class="snapshot"><div class="skeleton" style="height:22px;width:60%"></div></div>`,
     submitLabel: 'إرسال التقرير',
@@ -164,6 +175,10 @@ export async function composeReport({ project_id: projectId = null, task_id: tas
         title: d.title, body: d.body, project_id: scope, task_id: taskId, include_status: d.include_status, images,
         recipient_id: Number(d.recipient_id) || null,
       });
+      if (d.complete_follow_up) {
+        await api('POST', `/api/tasks/${taskId}/status`, { status: 'done', note: 'أُرسلت نتيجة المتابعة في تقرير' })
+          .catch((err) => toast(`أُرسل التقرير، لكن تعذّر تعليم المهمة مكتملة: ${err.message}`, { error: true }));
+      }
       location.hash = `#/reports/${report.id}?sent=1`;
     },
   });
@@ -211,6 +226,7 @@ export async function composeReport({ project_id: projectId = null, task_id: tas
   load();
   if (form.elements.scope) form.elements.scope.addEventListener('change', load);
   form.elements.include_status.addEventListener('change', (e) => preview.classList.toggle('hidden', !e.target.checked));
+  preview.classList.toggle('hidden', !form.elements.include_status.checked);
 }
 
 // ---------------------------------------------------------------------------

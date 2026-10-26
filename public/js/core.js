@@ -329,11 +329,15 @@ export function personLine(u) {
   return u.job_title ? `${esc(u.job_title)}` : esc(ROLE_LABELS[u.role] || '');
 }
 
+// A follow-up occurrence whose date has not come yet.
+export const isScheduled = (t) => !!(t.recurring_id && t.status === 'todo' && t.reminder_at && new Date(t.reminder_at) > new Date());
+
 export function taskCard(t, { showProject = true, showAssignee = false, i = 0 } = {}) {
   const dl = deadlineInfo(t.deadline, t.status);
   return `<article class="task s-${t.status}" data-href="#/tasks/${t.id}" style="--i:${Math.min(i, 12)}">
     <div class="grow">
-      <div class="t-title">${esc(t.title)}</div>
+      <div class="t-title">${t.recurring_id ? '🔁 ' : ''}${esc(t.title)}</div>
+      ${isScheduled(t) ? `<div class="t-note">📅 مجدولة بتاريخ ${esc(fmtDateTime(t.reminder_at))}</div>` : ''}
       ${t.status_note ? `<div class="t-note">${t.status === 'blocked' ? '⛔ ' : ''}${esc(t.status_note)}</div>` : ''}
       <div class="t-meta">
         ${showProject && t.project_name ? `<span>${icon('folder')}${esc(t.project_name)}</span>` : ''}
@@ -526,10 +530,13 @@ export function bindCreatorFields(root) {
 }
 
 // "To": my direct supervisor (first, chosen by default) or any manager above them.
-export function managerPicker(label = 'إلى', name = 'recipient_id') {
+// extra: people outside the chain who may also receive this (e.g. whoever set up a follow-up), listed first.
+export function managerPicker(label = 'إلى', name = 'recipient_id', { selected = null, extra = [] } = {}) {
   const chain = (state.me && state.me.chain) || [];
+  const others = extra.filter((p) => !chain.some((m) => m.id === p.id));
   return `<div class="field"><label>${label}</label><select name="${name}">
-    ${chain.map((m, i) => `<option value="${m.id}">${esc(m.name)}${m.job_title ? ` — ${esc(m.job_title)}` : ''}${
+    ${others.map((p) => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${esc(p.name)}${p.note ? ` (${esc(p.note)})` : ''}</option>`).join('')}
+    ${chain.map((m, i) => `<option value="${m.id}" ${m.id === selected ? 'selected' : ''}>${esc(m.name)}${m.job_title ? ` — ${esc(m.job_title)}` : ''}${
       i === 0 ? ' (المسؤول المباشر)' : ''}</option>`).join('')}</select>
     <span class="hint">يمكنك الإرسال إلى مسؤولك المباشر أو إلى أي مسؤول أعلى منه.</span></div>`;
 }

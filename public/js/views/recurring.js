@@ -8,6 +8,9 @@ import {
 
 const UNIT_LABELS = { day: 'يوم', week: 'أسبوع', month: 'شهر' };
 
+// The next occurrence is already a scheduled task waiting for its date.
+const upcoming = (r) => r.active && r.last_task_id && r.last_task_status === 'todo' && r.last_task_at && new Date(r.last_task_at) > new Date();
+
 function tomorrowNine() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -26,7 +29,7 @@ async function scheduleModal(project, current, onSaved) {
     title: current ? 'تعديل المتابعة الدورية' : 'متابعة دورية جديدة',
     wide: true,
     body: `
-      <p class="muted small" style="margin-top:0">في كل موعد تُنشأ مهمة للمسؤول عن المتابعة داخل هذا المشروع، مع تنبيه في موعدها.</p>
+      <p class="muted small" style="margin-top:0">تظهر كل متابعة قادمة مهمةً مجدولة عند المسؤول عنها قبل موعدها، مع تنبيه في الموعد، ويرسل نتيجتها في تقرير يمكن أن يتضمن صورًا.</p>
       <div class="field"><label>عنوان المتابعة</label><input name="title" required maxlength="300" value="${esc(r.title)}"></div>
       <div class="fields">
         <div class="field"><label>المسؤول عن المتابعة</label><select name="assignee_id">
@@ -81,15 +84,18 @@ export async function recurringSection(box, project, canManage) {
         <div class="grow">
           <div class="title">🔁 ${esc(r.title)}</div>
           <div class="meta">${esc(r.assignee_name)} · ${esc(r.every_label)}
-            · ${r.active ? `القادمة: ${esc(fmtDateTime(r.next_run_at))}` : '<span class="pill gray plain">متوقفة</span>'}
-            ${r.last_task_id ? ` · <a href="#/tasks/${r.last_task_id}">آخر مهمة</a> ${r.last_task_status ? statusPill(r.last_task_status) : ''}` : ''}</div>
+            · ${!r.active ? '<span class="pill gray plain">متوقفة</span>'
+              : upcoming(r) ? `مجدولة: <a href="#/tasks/${r.last_task_id}">${esc(fmtDateTime(r.last_task_at))}</a>`
+                : `القادمة: ${esc(fmtDateTime(r.next_run_at))}`}
+            ${r.last_task_id && !upcoming(r) ? ` · <a href="#/tasks/${r.last_task_id}">آخر مهمة</a> ${r.last_task_status ? statusPill(r.last_task_status) : ''}` : ''}
+            ${r.last_report_id ? ` · <a href="#/reports/${r.last_report_id}">آخر نتيجة</a>` : ''}</div>
         </div>
         ${canEdit(r) ? `<div class="row" style="gap:.25rem">
           <button class="icon-btn" data-toggle="${r.id}" aria-label="${r.active ? 'إيقاف مؤقت' : 'استئناف'}" title="${r.active ? 'إيقاف مؤقت' : 'استئناف'}">${icon(r.active ? 'clock' : 'check')}</button>
           <button class="icon-btn" data-edit-recurring="${r.id}" aria-label="تعديل">${icon('edit')}</button>
           <button class="icon-btn" data-del-recurring="${r.id}" aria-label="حذف">${icon('trash')}</button></div>` : ''}
       </div>`).join('')}</div>`
-    : `<p class="muted" style="margin:0">للمشاريع التي تحتاج متابعة كل فترة: حدّد المسؤول والتكرار، وتُنشأ له مهمة تلقائيًا في كل موعد.</p>`}`;
+    : `<p class="muted" style="margin:0">للمشاريع التي تحتاج متابعة كل فترة: حدّد المسؤول والتكرار، فتظهر له المتابعة القادمة مهمةً مجدولة، ويرسل نتيجتها في تقرير بالصور.</p>`}`;
     $('[data-add-recurring]', box).addEventListener('click', () => scheduleModal(project, null, draw));
     const byId = new Map(list.map((r) => [r.id, r]));
     $$('[data-edit-recurring]', box).forEach((b) => b.addEventListener('click', () => scheduleModal(project, byId.get(Number(b.dataset.editRecurring)), draw)));
