@@ -4,6 +4,7 @@ import {
   fmtDate, fmtDateTime, relTime, taskList,
 } from '../core.js';
 import { summaryPills } from './reports.js';
+import { remindTodayModal } from '../remind.js';
 import { buildXlsx, download } from '../xlsx.js';
 import { currentBrand, brandStyle, brandLogo, brandIssuer, loadBrandFont, workbookStyle } from '../brand.js';
 import { openReminder } from '../remind.js';
@@ -41,6 +42,7 @@ export async function viewTeam({ query }) {
       <div class="titles"><h1>متابعة الفريق</h1>
         <div class="sub">الفترة من ${esc(fmtDate(data.period.from))} إلى ${esc(fmtDate(data.period.to))}</div></div>
       <div class="actions">
+        <button class="btn subtle" id="remind-today">${icon('bell')}تذكير الفريق بمهام اليوم</button>
         <button class="btn" id="pdf">${icon('pdf')}تنزيل التقرير PDF</button>
         <button class="btn accent" id="xlsx">${icon('sheet')}تنزيل Excel</button>
       </div>
@@ -124,6 +126,7 @@ export async function viewTeam({ query }) {
     const m = members.find((x) => x.id === Number(b.dataset.remind));
     openReminder({ person: m, relation: 'down' });
   }));
+  $('#remind-today', el).addEventListener('click', () => remindTodayModal());
   $('#pdf', el).addEventListener('click', (e) => busy(e.currentTarget, () => printReport(data)));
   $('#xlsx', el).addEventListener('click', (e) => busy(e.currentTarget, async () => {
     download(teamWorkbook(data), `Ebtikar-Team-Report-${isoDay(new Date())}.xlsx`);

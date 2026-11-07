@@ -6,7 +6,7 @@ import {
 } from '../core.js';
 import { composeReport } from './reports.js';
 import { gallery, bindGallery, photoUploadModal } from '../uploads.js';
-import { openReminder } from '../remind.js';
+import { openReminder, remindTodayModal } from '../remind.js';
 
 // ---------------------------------------------------------------------------
 // Create / edit
@@ -123,7 +123,8 @@ export async function viewTasks({ query }) {
   const el = render(`
     <div class="page-head">
       <div class="titles"><h1>المهام</h1><div class="sub">${scope === 'team' ? 'متابعة مهام أعضاء فريقك' : 'المهام المسندة إليك في جميع المشاريع'}</div></div>
-      <div class="actions"><button class="btn" id="new-task">${icon('plus')}مهمة جديدة</button></div>
+      <div class="actions">${scope === 'team' ? `<button class="btn subtle" id="remind-today">${icon('bell')}تذكير الفريق بمهام اليوم</button>` : ''}
+        <button class="btn" id="new-task">${icon('plus')}مهمة جديدة</button></div>
     </div>
     ${me.has_team ? tabs([['mine', 'مهامي'], ['team', 'مهام الفريق']], scope) : ''}
     <div class="toolbar">
@@ -145,6 +146,8 @@ export async function viewTasks({ query }) {
   });
   const add = () => taskFormModal({});
   $('#new-task', el).addEventListener('click', add);
+  const remind = $('#remind-today', el);
+  if (remind) remind.addEventListener('click', () => remindTodayModal());
   setFab('مهمة جديدة', add);
 }
 

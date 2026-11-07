@@ -5,6 +5,7 @@ import { taskFormModal } from './tasks.js';
 import { composeReport } from './reports.js';
 import { newRequestModal } from './asks.js';
 import { newProjectModal } from './projects.js';
+import { remindTodayModal } from '../remind.js';
 
 // What needs the person now, each as one line that opens where it is dealt with.
 function todoRows(d, teamAlerts) {
@@ -75,6 +76,7 @@ export async function viewDashboard() {
         <button class="btn accent" id="q-task">${icon('plus')}مهمة جديدة</button>
         <button class="btn ghost" id="q-ask">${icon('box')}إرسال طلب</button>
         ${(me.chain || []).length ? `<button class="btn ghost" id="q-report">${icon('send')}إرسال تقرير</button>` : ''}
+        ${me.has_team ? `<button class="btn ghost" id="q-remind">${icon('bell')}تذكير الفريق بمهام اليوم</button>` : ''}
       </div>
     </section>
 
@@ -123,6 +125,8 @@ export async function viewDashboard() {
   const newTask = () => taskFormModal({});
   $('#q-task', el).addEventListener('click', newTask);
   $('#q-ask', el).addEventListener('click', () => newRequestModal());
+  const remind = $('#q-remind', el);
+  if (remind) remind.addEventListener('click', () => remindTodayModal());
   const rep = $('#q-report', el);
   if (rep) rep.addEventListener('click', () => composeReport({}));
   const hide = $('#hide-setup', el);

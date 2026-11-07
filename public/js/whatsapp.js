@@ -138,6 +138,19 @@ export function taskReminderMessage(task, person, note = '') {
   return lines.join('\n');
 }
 
+export function todayTasksMessage(person, tasks, note = '') {
+  const lines = [salutation(person, 'down'), ''];
+  lines.push(`نودّ تذكيركم بمهامكم لليوم (${plural(tasks.length, TASKS_N)}):`);
+  tasks.forEach((t, i) => {
+    const late = t.deadline && new Date(t.deadline) < new Date();
+    lines.push(`${i + 1}. *${t.title}*${t.project_name ? ` — ${t.project_name}` : ''}${
+      t.deadline ? ` (${late ? 'متأخرة، كان موعدها' : 'الموعد'} ${fmtDateTime(t.deadline)})` : ''}`);
+  });
+  if (note) lines.push('', note);
+  lines.push('', 'نرجو إنجازها وتحديث حالتها على المنصة.', appLink('#/tasks?status=today'), closing('down'));
+  return lines.join('\n');
+}
+
 export function requestReminderMessage(request, person, note = '') {
   const what = request.scope === 'project' ? `متطلبات مشروع «${request.project_name}»` : `متطلبات المهمة «${request.task_title}»`;
   const lines = [salutation(person, 'up'), ''];

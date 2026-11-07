@@ -1,8 +1,67 @@
 // Reminder composer: about a task (to someone in my team), a pending request (to someone above me),
 // or a general note. Sent as an in-app alert and/or a WhatsApp message worded for the recipient.
 
-import { $, esc, icon, api, toast, openModal, avatar, busy, STATUS_LABELS, ROLE_LABELS } from './core.js';
-import { launchWhatsApp, waPreview, taskReminderMessage, requestReminderMessage, generalMessage } from './whatsapp.js';
+import {
+  $, $$, esc, icon, api, toast, openModal, avatar, busy, isToday, rememberPhotos, STATUS_LABELS, ROLE_LABELS, plural, TASKS_N,
+} from './core.js';
+import {
+  launchWhatsApp, waPreview, taskReminderMessage, requestReminderMessage, generalMessage, openWhatsApp, todayTasksMessage,
+} from './whatsapp.js';
+
+// Everyone in my team reminded of all their work for today at once: one alert each (it rings in the
+// app and on their phone), and WhatsApp per person when wanted.
+export async function remindTodayModal() {
+  const [{ tasks }, { users }] = await Promise.all([api('GET', '/api/tasks?scope=team'), api('GET', '/api/users')]);
+  rememberPhotos(users);
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const groups = new Map();
+  for (const t of tasks.filter(isToday)) {
+    if (!groups.has(t.assignee_id)) groups.set(t.assignee_id, []);
+    groups.get(t.assignee_id).push(t);
+  }
+  const people = [...groups].map(([id, list]) => ({ person: byId.get(id) || { id, name: list[0].assignee_name }, tasks: list }))
+    .sort((a, b) => b.tasks.length - a.tasks.length);
+  if (!people.length) {
+    toast('لا توجد مهام لليوم لدى فريقك');
+    return;
+  }
+  const { el, close } = openModal({
+    title: 'تذكير الفريق بمهام اليوم',
+    wide: true,
+    body: `
+      <p class="muted small" style="margin-top:0">يصل كل شخص تذكير واحد بكل مهامه لليوم، داخل المنصة وعلى هاتفه. ألغِ اختيار من لا تريد تذكيره.</p>
+      <div class="remind-people">${people.map(({ person: u, tasks: list }) => `<div class="remind-person">
+        <label class="check"><input type="checkbox" name="pick" value="${u.id}" data-multi checked>
+          ${avatar(u.name, u.id, 'sm')}<span class="grow"><strong>${esc(u.name)}</strong>
+          <small>${plural(list.length, TASKS_N)}: ${list.slice(0, 3).map((t) => esc(t.title)).join('، ')}${list.length > 3 ? '…' : ''}</small></span></label>
+        <button type="button" class="icon-btn wa-mini" data-wa="${u.id}" aria-label="واتساب ${esc(u.name)}" title="إرسال عبر واتساب">${icon('whatsapp')}</button>
+      </div>`).join('')}</div>
+      <div class="field"><label>ملاحظة مع التذكير <span class="hint">(اختياري)</span></label>
+        <input name="message" maxlength="1000" placeholder="مثال: يُرجى تحديث الحالات قبل الساعة الرابعة"></div>`,
+    submitLabel: 'إرسال التذكير',
+    onSubmit: async (d) => {
+      const picked = new Set((d.pick || []).map(Number));
+      if (!picked.size) throw new Error('اختر شخصًا واحدًا على الأقل');
+      const { sent, skipped } = await api('POST', '/api/team/remind-today', {
+        message: d.message,
+        people: people.filter((p) => picked.has(p.person.id)).map((p) => ({ user_id: p.person.id, task_ids: p.tasks.map((t) => t.id) })),
+      });
+      toast(sent.length ? `أُرسل التذكير إلى ${sent.join('، ')}${skipped.length ? `، وتُرك ${skipped.join('، ')} (ذُكّر قبل قليل)` : ''}`
+        : `ذُكّر ${skipped.join('، ')} قبل قليل؛ يمكن التذكير مجددًا بعد عشر دقائق`, { error: !sent.length });
+    },
+  });
+  const count = () => {
+    const n = $$('[name=pick]:checked', el).length;
+    $('button[type=submit]', el).textContent = n ? `إرسال التذكير (${n})` : 'إرسال التذكير';
+  };
+  count();
+  el.addEventListener('change', count);
+  $$('[data-wa]', el).forEach((b) => b.addEventListener('click', () => {
+    const p = people.find((x) => x.person.id === Number(b.dataset.wa));
+    openWhatsApp(p.person.phone, todayTasksMessage(p.person, p.tasks, $('[name=message]', el).value.trim()), { name: p.person.name });
+  }));
+  return close;
+}
 
 export async function openReminder({ person, relation, task = null, request = null }) {
   let subjects = [];

@@ -861,6 +861,12 @@ input[type="checkbox"] { width: auto; accent-color: var(--primary); }
 .toast.out { opacity: 0; transform: translateY(-8px); }
 .toast .badge { width: 24px; height: 24px; border-radius: 8px; display: grid; place-items: center; background: var(--green); color: var(--navy); }
 .toast .badge svg.i { stroke-width: 2.6; width: 16px; height: 16px; stroke-dasharray: 30; stroke-dashoffset: 30; animation: checkDraw .45s var(--ease) .1s forwards; }
+.remind-people { display: grid; grid-template-columns: minmax(0, 1fr); gap: .45rem; margin-bottom: 1rem; max-height: 46vh; overflow-y: auto; }
+.remind-person { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+.remind-person .check { flex: 1; min-width: 0; }
+.remind-person .check small { display: block; color: var(--muted); font-size: .8rem; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.remind-person .grow { min-width: 0; }
+.wa-mini { color: #128C4A; flex-shrink: 0; }
 .toast-action {
   pointer-events: auto; margin-inline-start: .3rem; padding: .25rem .65rem; border-radius: 8px; cursor: pointer;
   font: inherit; font-size: .85rem; font-weight: 700; color: var(--green); background: rgba(255, 255, 255, .1); border: 1px solid rgba(255, 255, 255, .2);

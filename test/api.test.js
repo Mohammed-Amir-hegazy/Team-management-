@@ -214,6 +214,26 @@ test('work is sent for review and approved from the lists, without opening the t
   await employee('POST', `/api/tasks/${task.id}/status`, { status: 'blocked', note: 'Waiting for design' });
 });
 
+test('the whole team is reminded of its work for today at once, one alert per person', async () => {
+  const people_ = [{ user_id: people.employee.id, task_ids: [task.id] }];
+  // Only one's own team.
+  assert.equal((await otherLeader('POST', '/api/team/remind-today', { people: people_ })).status, 403);
+  assert.equal((await employee('POST', '/api/team/remind-today', { people: [{ user_id: people.leader.id, task_ids: [task.id] }] })).status, 403);
+  // A task that is not theirs is ignored; nothing left means nothing to send.
+  assert.equal((await manager('POST', '/api/team/remind-today', { people: [{ user_id: people.leader.id, task_ids: [task.id] }] })).status, 400);
+
+  const r = await manager('POST', '/api/team/remind-today', { people: people_, message: 'قبل الرابعة' });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual(r.data.sent, ['Employee']);
+  const alert = (await employee('GET', '/api/notifications')).data.notifications[0];
+  assert.equal(alert.type, 'nudge');
+  assert.equal(alert.link, '#/tasks?status=today');
+  assert.ok(alert.message.includes(task.title) && alert.message.includes('قبل الرابعة'), alert.message);
+  // Not twice within ten minutes.
+  const again = await leader('POST', '/api/team/remind-today', { people: people_ });
+  assert.deepEqual(again.data, { sent: [], skipped: ['Employee'] });
+});
+
 test('reports go to the direct supervisor or any manager above, never outside the chain', async () => {
   const outside = await employee('POST', '/api/reports', { title: 'Hi', body: 'x', recipient_id: people.otherLeader.id });
   assert.equal(outside.status, 403);

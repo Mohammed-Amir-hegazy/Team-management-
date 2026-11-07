@@ -295,6 +295,38 @@ module.exports = function register(router) {
     return { ok: true };
   });
 
+  // One reminder per person in my team about all of their work for today. Which tasks are "today" is
+  // decided in the manager's browser (their own day); each task is checked here.
+  router.post('/api/team/remind-today', async ({ db, user, body }) => {
+    const people = Array.isArray(body.people) ? body.people.slice(0, 200) : [];
+    const message = v.text(body.message, 'ملاحظة التذكير', { required: false, max: 1000 });
+    const subs = await subordinateIds(db, user.id);
+    const since = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const link = '#/tasks?status=today';
+    const sent = [];
+    const skipped = [];
+    for (const p of people) {
+      const id = v.id(p.user_id, 'الموظف');
+      if (!subs.has(id)) throw new HttpError(403, 'يمكنك تذكير أعضاء فريقك فقط');
+      const ids = (Array.isArray(p.task_ids) ? p.task_ids : []).slice(0, 100).map((x) => v.id(x, 'المهمة'));
+      if (!ids.length) continue;
+      const tasks = await db.all(`SELECT id, title FROM tasks WHERE assignee_id = ? AND status != 'done'
+        AND id IN (${ids.map(() => '?').join(',')}) ORDER BY deadline IS NULL, deadline`, id, ...ids);
+      const target = await getUser(db, id);
+      if (!tasks.length || !target || !target.active) continue;
+      if (await db.get(`SELECT 1 FROM notifications WHERE user_id = ? AND type = 'nudge' AND link = ? AND created_at > ?`, id, link, since)) {
+        skipped.push(target.name);
+        continue;
+      }
+      const titles = tasks.slice(0, 5).map((t) => `«${t.title}»`).join('، ') + (tasks.length > 5 ? ` و${tasks.length - 5} غيرها` : '');
+      await notify(db, id, 'nudge',
+        `🔔 ${byGender(user, 'يذكّرك', 'تذكّرك')} ${user.name} بمهامك اليوم (${tasks.length}): ${titles}${message ? ` — ${message}` : ''}`, link);
+      sent.push(target.name);
+    }
+    if (!sent.length && !skipped.length) throw new HttpError(400, 'لا توجد مهام مفتوحة لليوم للتذكير بها');
+    return { sent, skipped };
+  });
+
   // ---- Requirements -------------------------------------------------------
 
   router.post('/api/tasks/:id/requirements', async ({ db, user, params, body }) => {
