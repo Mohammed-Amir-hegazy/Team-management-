@@ -6,7 +6,7 @@ const v = require('../validate');
 const {
   TASK_STATUSES, STATUS_LABELS, PRIORITIES, getUser, subordinateIds, isSelfOrBelow,
   addProjectMember, loadProject, loadTask, canEditTask, canUpdateTaskStatus,
-  purgeTasks, notify, personalProject, byGender,
+  purgeTasks, notify, personalProject, byGender, markStatusRights,
 } = require('../access');
 const { sendRequirements } = require('../requirements');
 const { validateImages } = require('../images');
@@ -103,7 +103,7 @@ module.exports = function register(router) {
       params.push(v.oneOf(status, TASK_STATUSES, 'الحالة'));
     }
     sql += " ORDER BY t.status = 'done', t.deadline IS NULL, t.deadline LIMIT 500";
-    return { tasks: await db.all(sql, ...params) };
+    return { tasks: await markStatusRights(db, user, await db.all(sql, ...params)) };
   });
 
   router.post('/api/projects/:id/tasks', async ({ db, user, params, body }) => {
@@ -246,7 +246,7 @@ module.exports = function register(router) {
           `${byGender(user, 'غيّر', 'غيّرت')} ${user.name} حالة المهمة «${task.title}» إلى «${STATUS_LABELS[status]}»${reason}`, `#/tasks/${task.id}`);
       }
     });
-    return { task: await taskWithNames(db, task.id) };
+    return { task: { ...(await taskWithNames(db, task.id)), can_update: true } };
   });
 
   router.delete('/api/tasks/:id', async ({ db, user, params }) => {

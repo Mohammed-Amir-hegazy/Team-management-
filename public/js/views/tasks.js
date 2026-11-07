@@ -2,7 +2,7 @@ import {
   state, $, $$, esc, icon, api, render, setTitle, setFab, toast, openModal, confirmDialog, attempt, busy,
   STATUS_LABELS, STATUSES, PRIORITY_LABELS, REQUEST_STATUS,
   statusPill, pill, avatar, taskList, tabs, onTabs, remember, deadlineInfo, fmtDateTime, relTime,
-  toLocalInput, fromLocalInput, plural, ITEMS_N, formData, managerPicker, isScheduled,
+  toLocalInput, fromLocalInput, plural, ITEMS_N, formData, managerPicker, isScheduled, isToday,
 } from '../core.js';
 import { composeReport } from './reports.js';
 import { gallery, bindGallery, photoUploadModal } from '../uploads.js';
@@ -105,9 +105,9 @@ export async function viewTasks({ query }) {
   remember('taskScope', scope);
 
   const qs = new URLSearchParams({ scope });
-  if (status) qs.set('status', status);
+  if (status && status !== 'today') qs.set('status', status);
   if (assignee && scope === 'team') qs.set('assignee', assignee);
-  const [{ tasks }, team] = await Promise.all([
+  const [{ tasks: all }, team] = await Promise.all([
     api('GET', `/api/tasks?${qs}`),
     scope === 'team' ? api('GET', '/api/users').then((r) => r.users.filter((u) => u.in_my_team && u.active)) : [],
   ]);
@@ -117,7 +117,8 @@ export async function viewTasks({ query }) {
     for (const [k, v] of [...p]) if (!v) p.delete(k);
     location.hash = `#/tasks?${p}`;
   };
-  const filters = [['', 'الكل'], ...STATUSES.filter((s) => s !== 'done').map((s) => [s, STATUS_LABELS[s]]), ['overdue', 'متأخرة'], ['done', 'مكتملة']];
+  const tasks = status === 'today' ? all.filter(isToday) : all;
+  const filters = [['', 'الكل'], ['today', 'اليوم'], ...STATUSES.filter((s) => s !== 'done').map((s) => [s, STATUS_LABELS[s]]), ['overdue', 'متأخرة'], ['done', 'مكتملة']];
 
   const el = render(`
     <div class="page-head">

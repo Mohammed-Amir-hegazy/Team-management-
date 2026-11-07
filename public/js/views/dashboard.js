@@ -1,5 +1,5 @@
 import {
-  state, $, esc, icon, mark, api, render, setTitle, setFab, taskList, greeting, fmtLongDate, plural, TASKS_N,
+  state, $, esc, icon, mark, api, render, setTitle, setFab, taskList, greeting, fmtLongDate, plural, TASKS_N, isToday,
 } from '../core.js';
 import { taskFormModal } from './tasks.js';
 import { composeReport } from './reports.js';
@@ -9,13 +9,10 @@ import { newProjectModal } from './projects.js';
 // What needs the person now, each as one line that opens where it is dealt with.
 function todoRows(d, teamAlerts) {
   const s = d.my_tasks_by_status;
-  const endOfDay = new Date();
-  endOfDay.setHours(23, 59, 59, 999);
-  const dueToday = d.upcoming.filter((t) => new Date(t.deadline) <= endOfDay).length;
   return [
     ['red', 'clock', 'مهام متأخرة عن موعدها', 'حدّث حالتها، أو اذكر سبب التأخير', d.overdue.length, '#/tasks?status=overdue'],
     ['red', 'alert', 'مهام متوقفة لديك', 'اطلب ما تحتاجه لتكمل العمل', s.blocked || 0, '#/tasks?status=blocked'],
-    ['amber', 'calendar', 'مستحقة اليوم', 'موعدها النهائي ينتهي اليوم', dueToday, '#/tasks'],
+    ['amber', 'eye', 'مهام بانتظار مراجعتك', 'اعتمد التسليم أو أرجعها للتعديل من «بانتظار مراجعتك» أدناه', (d.team_review || []).length, '#review'],
     ['navy', 'box', 'طلبات تنتظر ردك', 'وافق عليها أو أضفها إلى مهامك أو اعتذر عنها', (d.pending_requests || 0) + (d.pending_asks || 0), '#/requests'],
     ['blue', 'report', 'تقارير لم تقرأها', 'تقارير وصلتك من فريقك', d.unread_reports || 0, '#/reports'],
     state.me.has_team ? ['red', 'users', 'تنبيهات الفريق', 'مهام متوقفة أو متأخرة لدى فريقك', teamAlerts.length, '#/team'] : null,
@@ -50,12 +47,16 @@ export async function viewDashboard() {
   const me = state.me;
   const s = d.my_tasks_by_status;
   const open = (s.todo || 0) + (s.in_progress || 0) + (s.blocked || 0) + (s.review || 0);
-  const attention = [...d.overdue, ...d.upcoming];
 
   // Team alerts: blocked or late work below me, each task once.
   const seen = new Set();
   const teamAlerts = [...d.team_blocked, ...d.team_overdue].filter((t) => !seen.has(t.id) && seen.add(t.id));
   const todo = todoRows(d, teamAlerts);
+  // Today's work, then what comes later this week.
+  const today = (d.my_open || []).filter(isToday).sort((a, b) => (a.deadline || '9') < (b.deadline || '9') ? -1 : 1);
+  const todayIds = new Set(today.map((t) => t.id));
+  const later = d.upcoming.filter((t) => !todayIds.has(t.id));
+  const review = d.team_review || [];
 
   const summary = todo.length
     ? `لديك ${todo.length === 1 ? 'أمر واحد يحتاج' : `${todo.length} أمور تحتاج`} إلى انتباهك اليوم.`
@@ -89,14 +90,27 @@ export async function viewDashboard() {
         <div class="muted small">لا توجد مهام متأخرة أو متوقفة، ولا طلبات أو تقارير تنتظرك.</div></div></div>`}
     </section>
 
+    <section class="card today">
+      <div class="card-head"><h2>مهامي اليوم</h2>${today.length ? `<span class="pill blue plain">${plural(today.length, TASKS_N)}</span>` : ''}
+        <div class="actions"><a class="btn sm ghost" href="#/tasks?status=today">عرض الكل</a></div></div>
+      ${today.length ? `<p class="muted small" style="margin:-.3rem 0 .7rem">عند الانتهاء اضغط «قيد المراجعة» ليراجعها مسؤولك، أو «تم التسليم» مباشرة، دون فتح المهمة.</p>` : ''}
+      ${today.length ? taskList(today) : `<div class="all-clear">${icon('check')}<div><strong>لا توجد مهام لليوم</strong>
+        <div class="muted small">لا توجد مهام متأخرة أو مستحقة اليوم أو قيد التنفيذ.</div></div></div>`}
+    </section>
+
     <nav class="stat-strip" aria-label="مهامي حسب الحالة">${stats.map(([k, label]) => `<a href="#/tasks?status=${k}" class="s-${k}">
       <b>${s[k] || 0}</b><span>${label}</span></a>`).join('')}</nav>
 
     <div class="grid two">
+      ${review.length ? `<section class="card" id="review">
+        <div class="card-head"><h2>بانتظار مراجعتك</h2><span class="pill amber plain">${review.length}</span>
+          <div class="actions"><a class="btn sm ghost" href="#/tasks?scope=team&status=review">الكل</a></div></div>
+        ${taskList(review, { showAssignee: true })}
+      </section>` : ''}
       <section class="card">
-        <div class="card-head"><h2>مهامي القريبة</h2>
+        <div class="card-head"><h2>قادمة هذا الأسبوع</h2>
           <div class="actions"><a class="btn sm ghost" href="#/tasks">جميع مهامي</a></div></div>
-        ${taskList(attention, { emptyTitle: 'لا توجد مهام قريبة', emptyText: 'لا توجد مهام متأخرة أو مستحقة خلال الأيام السبعة القادمة.' })}
+        ${taskList(later, { emptyTitle: 'لا توجد مهام قادمة', emptyText: 'لا توجد مهام أخرى مستحقة خلال الأيام السبعة القادمة.' })}
       </section>
       ${me.has_team ? `
       <section class="card">
@@ -116,6 +130,8 @@ export async function viewDashboard() {
     try { localStorage.setItem(`setupHidden:${me.company_id}`, '1'); } catch { /* ignore */ }
     hide.closest('.setup').remove();
   });
+  const toReview = $('a[href="#review"]', el);
+  if (toReview) toReview.addEventListener('click', (e) => { e.preventDefault(); $('#review', el).scrollIntoView({ behavior: 'smooth', block: 'start' }); });
   const firstProject = $('a[href="#new-project"]', el);
   if (firstProject) firstProject.addEventListener('click', (e) => { e.preventDefault(); newProjectModal(); });
   setFab('مهمة جديدة', newTask);

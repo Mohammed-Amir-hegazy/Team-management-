@@ -206,6 +206,16 @@ async function canUpdateTaskStatus(db, user, task) {
   return task.assignee_id === user.id || canEditTask(db, user, task);
 }
 
+// Marks each task this person may move along (its status), so lists can offer that in place.
+// The same rule as canUpdateTaskStatus, with one look-up for the whole list.
+async function markStatusRights(db, user, tasks) {
+  const subs = await subordinateIds(db, user.id);
+  for (const t of tasks) {
+    t.can_update = user.role === 'owner' || t.assignee_id === user.id || t.created_by === user.id || subs.has(t.assignee_id);
+  }
+  return tasks;
+}
+
 // Removes tasks and everything hanging off them. Done explicitly rather than relying on
 // ON DELETE CASCADE so it behaves the same whether or not foreign keys are enforced.
 // taskIdsSql is a SELECT returning the ids of the tasks to remove.
@@ -274,6 +284,7 @@ function publicUser(user) {
 }
 
 module.exports = {
+  markStatusRights,
   chooseManager,
   byGender,
   colleagueName,

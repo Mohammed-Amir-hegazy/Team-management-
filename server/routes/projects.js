@@ -5,7 +5,7 @@ const { now } = require('../db');
 const v = require('../validate');
 const {
   PROJECT_STATUSES, getUser, subordinateIds, isSelfOrBelow, visibleProjects, canManageProject,
-  isProjectMember, addProjectMember, loadProject, deleteProject, publicUser, notify,
+  isProjectMember, addProjectMember, loadProject, deleteProject, publicUser, notify, markStatusRights,
 } = require('../access');
 const { sendRequirements } = require('../requirements');
 
@@ -86,6 +86,7 @@ module.exports = function register(router) {
       WHERE t.project_id = ?
       ORDER BY t.status = 'done', t.deadline IS NULL, t.deadline
     `, project.id);
+    await markStatusRights(db, user, tasks);
     const { n: myDrafts } = await db.get(`
       SELECT COUNT(*) AS n FROM requirements r JOIN tasks t ON t.id = r.task_id
       WHERE t.project_id = ? AND r.requested_by = ? AND r.request_id IS NULL

@@ -170,12 +170,16 @@ export async function api(method, path, body) {
 // Feedback: toasts, modals
 // ---------------------------------------------------------------------------
 
-export function toast(message, { error = false } = {}) {
+// action: { label, fn } adds a button (e.g. «تراجع») and keeps the message up a little longer.
+export function toast(message, { error = false, action = null } = {}) {
   const el = document.createElement('div');
   el.className = `toast${error ? ' error' : ''}`;
-  el.innerHTML = `<span class="badge">${icon(error ? 'alert' : 'check')}</span><span>${esc(message)}</span>`;
+  el.innerHTML = `<span class="badge">${icon(error ? 'alert' : 'check')}</span><span>${esc(message)}</span>${
+    action ? `<button type="button" class="toast-action">${esc(action.label)}</button>` : ''}`;
   $('#toast-root').appendChild(el);
-  setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, error ? 4500 : 2800);
+  const hide = () => { el.classList.add('out'); setTimeout(() => el.remove(), 300); };
+  if (action) $('.toast-action', el).addEventListener('click', () => { hide(); action.fn(); });
+  setTimeout(hide, error ? 4500 : action ? 6000 : 2800);
 }
 
 export async function attempt(fn, successMessage) {
@@ -332,9 +336,37 @@ export function personLine(u) {
 // A follow-up occurrence whose date has not come yet.
 export const isScheduled = (t) => !!(t.recurring_id && t.status === 'todo' && t.reminder_at && new Date(t.reminder_at) > new Date());
 
+// The person's own day (not the server's): open work that is late, due today, under way, or set for today.
+export function isToday(t) {
+  if (t.status === 'done' || t.status === 'review') return false;
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return t.status === 'in_progress' || (!!t.deadline && new Date(t.deadline) <= end)
+    || (!!t.reminder_at && new Date(t.reminder_at) >= start && new Date(t.reminder_at) <= end);
+}
+
+// Moving a task along without opening it. The assignee sends it for review or marks it delivered;
+// whoever reviews it confirms delivery or returns it for changes.
+function quickActions(t) {
+  if (!t.can_update || t.status === 'done') return '';
+  const mine = state.me && t.assignee_id === state.me.id;
+  // Someone else's work waits for them to hand it in; only then is it for the reviewer to act on.
+  if (!mine && t.status !== 'review') return '';
+  const btn = (to, label, ic, cls = '') => `<button type="button" class="quick-btn ${cls}" data-quick="${to}" data-task="${t.id}">${icon(ic)}${label}</button>`;
+  const buttons = t.status === 'review'
+    ? [btn('done', mine ? 'تم التسليم' : 'اعتماد التسليم', 'check', 'go'), mine ? '' : btn('in_progress', 'إرجاع للتعديل', 'undo')]
+    : [btn('review', 'قيد المراجعة', 'eye'), btn('done', 'تم التسليم', 'check', 'go')];
+  return `<div class="t-quick">${buttons.join('')}</div>`;
+}
+
+const cardTasks = new Map();
+
 export function taskCard(t, { showProject = true, showAssignee = false, i = 0 } = {}) {
+  cardTasks.set(t.id, t);
   const dl = deadlineInfo(t.deadline, t.status);
-  return `<article class="task s-${t.status}" data-href="#/tasks/${t.id}" style="--i:${Math.min(i, 12)}">
+  return `<article class="task s-${t.status}" data-href="#/tasks/${t.id}" data-task-card="${t.id}" data-sp="${showProject ? 1 : ''}" data-sa="${showAssignee ? 1 : ''}" style="--i:${Math.min(i, 12)}">
     <div class="grow">
       <div class="t-title">${t.recurring_id ? '🔁 ' : ''}${esc(t.title)}</div>
       ${isScheduled(t) ? `<div class="t-note">📅 مجدولة بتاريخ ${esc(fmtDateTime(t.reminder_at))}</div>` : ''}
@@ -345,10 +377,59 @@ export function taskCard(t, { showProject = true, showAssignee = false, i = 0 } 
         <span class="${dl.late ? 'late' : ''}" title="${esc(dl.full || '')}">${icon('clock')}${esc(dl.text)}</span>
         <span class="prio-${t.priority}">${icon('flag')}${PRIORITY_LABELS[t.priority]}</span>
       </div>
+      ${quickActions(t)}
     </div>
     <div class="t-side">${statusPill(t.status)}</div>
   </article>`;
 }
+
+// Redraws one card in place (keeping its place in the list) after its status changed.
+function redrawCard(card, task) {
+  const box = document.createElement('div');
+  box.innerHTML = taskCard(task, { showProject: !!card.dataset.sp, showAssignee: !!card.dataset.sa });
+  bindLinks(box);
+  const fresh = box.firstElementChild;
+  fresh.style.animation = 'none';
+  card.replaceWith(fresh);
+  return fresh;
+}
+
+const QUICK_DONE = { review: 'أُرسلت المهمة للمراجعة', done: 'تم تسليم المهمة', in_progress: 'أُعيدت المهمة للتعديل' };
+
+async function quickStatus(btn) {
+  let card = btn.closest('[data-task-card]');
+  const before = cardTasks.get(Number(btn.dataset.task));
+  if (!card || !before) return;
+  const to = btn.dataset.quick;
+  $$('.quick-btn', card).forEach((b) => { b.disabled = true; });
+  try {
+    const { task } = await api('POST', `/api/tasks/${before.id}/status`, { status: to, note: '' });
+    card = redrawCard(card, { ...before, ...task });
+    window.dispatchEvent(new CustomEvent('task-status', { detail: task }));
+    toast(QUICK_DONE[to], {
+      action: {
+        label: 'تراجع',
+        fn: async () => {
+          try {
+            const { task: back } = await api('POST', `/api/tasks/${before.id}/status`, { status: before.status, note: before.status_note || '' });
+            if (card.isConnected) redrawCard(card, { ...before, ...back });
+            window.dispatchEvent(new CustomEvent('task-status', { detail: back }));
+          } catch (err) {
+            toast(err.message, { error: true });
+          }
+        },
+      },
+    });
+  } catch (err) {
+    $$('.quick-btn', card).forEach((b) => { b.disabled = false; });
+    toast(err.message, { error: true });
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-quick]');
+  if (btn) quickStatus(btn);
+});
 
 export function taskList(tasks, opts = {}) {
   if (!tasks.length) return emptyState(opts.emptyTitle || 'لا توجد مهام', opts.emptyText || '');

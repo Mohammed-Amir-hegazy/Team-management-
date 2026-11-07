@@ -2,7 +2,7 @@
 
 const { now } = require('../db');
 const v = require('../validate');
-const { subordinateIds, isAdmin } = require('../access');
+const { subordinateIds, isAdmin, markStatusRights } = require('../access');
 const { releasesFor } = require('../releases');
 const { runRecurringSoon } = require('./recurring');
 
@@ -49,22 +49,28 @@ module.exports = function register(router) {
     for (const row of await db.all('SELECT status, COUNT(*) AS n FROM tasks WHERE assignee_id = ? GROUP BY status', user.id)) {
       byStatus[row.status] = row.n;
     }
-    const mine = await db.all(`${TASK_SQL} WHERE t.assignee_id = ? AND t.status != 'done' AND t.deadline <= ? ORDER BY t.deadline`,
-      user.id, week);
+    // All my open work: the page picks out today's (its "today" is the person's own day).
+    const open = await db.all(`${TASK_SQL} WHERE t.assignee_id = ? AND t.status != 'done'
+      ORDER BY t.deadline IS NULL, t.deadline LIMIT 300`, user.id);
+    const mine = open.filter((t) => t.deadline && t.deadline <= week);
 
     const subs = [...(await subordinateIds(db, user.id))];
     let teamBlocked = [];
     let teamOverdue = [];
+    let teamReview = [];
     if (subs.length) {
       const ph = subs.map(() => '?').join(',');
       const team = await db.all(`
         ${TASK_SQL} WHERE t.assignee_id IN (${ph})
-          AND (t.status = 'blocked' OR (t.status != 'done' AND t.deadline < ?))
+          AND (t.status IN ('blocked', 'review') OR (t.status != 'done' AND t.deadline < ?))
         ORDER BY t.deadline
       `, ...subs, ts);
       teamBlocked = team.filter((t) => t.status === 'blocked');
-      teamOverdue = team.filter((t) => t.status !== 'done' && t.deadline && t.deadline < ts);
+      teamOverdue = team.filter((t) => t.status !== 'done' && t.status !== 'review' && t.deadline && t.deadline < ts);
+      teamReview = team.filter((t) => t.status === 'review');
+      await markStatusRights(db, user, team);
     }
+    await markStatusRights(db, user, open);
     const counts = await db.get(`
       SELECT
         (SELECT COUNT(*) FROM reports WHERE recipient_id = ? AND read_at IS NULL) AS unread_reports,
@@ -86,6 +92,8 @@ module.exports = function register(router) {
       upcoming: mine.filter((t) => t.deadline >= ts),
       team_blocked: teamBlocked,
       team_overdue: teamOverdue,
+      team_review: teamReview,
+      my_open: open,
       team_size: subs.length,
       ...counts,
     };

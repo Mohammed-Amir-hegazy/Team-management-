@@ -188,6 +188,32 @@ test('task status with a reason', async () => {
   assert.equal((await employee('PATCH', `/api/tasks/${task.id}`, { reminder_at: null })).status, 200);
 });
 
+test('work is sent for review and approved from the lists, without opening the task', async () => {
+  const find = (list) => list.find((t) => t.id === task.id);
+  // Each list says who may move the task along: the assignee and those above them, not a peer.
+  assert.equal(find((await employee('GET', '/api/tasks')).data.tasks).can_update, true);
+  assert.equal(find((await manager('GET', '/api/tasks?scope=team')).data.tasks).can_update, true);
+  const project = (await leader('GET', `/api/projects/${task.project_id}`)).data;
+  assert.equal(find(project.tasks).can_update, true);
+  assert.ok(find((await employee('GET', '/api/dashboard')).data.my_open), 'open work is there for «مهامي اليوم»');
+
+  const sent = await employee('POST', `/api/tasks/${task.id}/status`, { status: 'review', note: '' });
+  assert.equal(sent.status, 200);
+  assert.equal(sent.data.task.can_update, true);
+  for (const above of [leader, manager]) {
+    const review = (await above('GET', '/api/dashboard')).data.team_review;
+    assert.equal(find(review).can_update, true, 'waiting for their review, with the right to act on it');
+  }
+  assert.equal(find((await employee('GET', '/api/dashboard')).data.my_open).status, 'review');
+  assert.equal((await otherLeader('POST', `/api/tasks/${task.id}/status`, { status: 'done', note: '' })).status, 404);
+
+  const approved = await manager('POST', `/api/tasks/${task.id}/status`, { status: 'done', note: '' });
+  assert.equal(approved.data.task.status, 'done');
+  assert.ok((await employee('GET', '/api/notifications')).data.notifications.some((n) => n.message.includes('«مكتملة»')));
+  // Back as it was for the tests that follow.
+  await employee('POST', `/api/tasks/${task.id}/status`, { status: 'blocked', note: 'Waiting for design' });
+});
+
 test('reports go to the direct supervisor or any manager above, never outside the chain', async () => {
   const outside = await employee('POST', '/api/reports', { title: 'Hi', body: 'x', recipient_id: people.otherLeader.id });
   assert.equal(outside.status, 403);
